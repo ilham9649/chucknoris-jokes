@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chuck Norris Jokes</title>
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <h1>Chuck Norris Jokes</h1>
+        {% if icon_url %}
+        <img src="{{ icon_url }}" alt="Chuck Norris" class="icon">
+        {% endif %}
+        <div class="joke-container">
+            <p class="joke">{{ joke }}</p>
+        </div>
+        <button onclick="location.reload()" class="refresh-btn">Get Another Joke</button>
+        {% if joke_id %}
+        <p class="joke-id">Joke ID: {{ joke_id }}</p>
+        {% endif %}
+    </div>
+</body>
+</html>
