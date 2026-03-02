@@ -10,6 +10,7 @@ Build and deploy a Chuck Norris jokes web application using:
 - Docker containerization (2 containers)
 - Terraform for infrastructure (AWS)
 - Automated file change detection and deployment
+- Remote-exec provisioners for server setup
 
 ### Application Features
 - Fetches random Chuck Norris jokes from [Chuck Norris API](https://api.chucknorris.io/)
@@ -43,8 +44,9 @@ Build and deploy a Chuck Norris jokes web application using:
      - Default VPC & Subnet
 
 4. **Deployment** (`scripts/`)
-   - `deploy.sh`: Automated deployment script
-   - `destroy.sh`: Resource cleanup
+   - `setup.sh`: Server setup and application deployment script
+   - Uploads via Terraform `provisioner "file"`
+   - Executed via Terraform `provisioner "remote-exec"`
 
 ### Deployment Workflow
 
@@ -54,9 +56,11 @@ Build and deploy a Chuck Norris jokes web application using:
 3. Terraform detects file changes (SHA256 hash)
 4. Files are zipped and uploaded to S3
 5. EC2 instance is created/recreated
-6. User Data script downloads files from S3
-7. Docker Compose starts containers
-8. Application accessible via Elastic IP
+6. Terraform uploads scripts/setup.sh via provisioner "file"
+7. Terraform executes setup.sh via provisioner "remote-exec"
+8. Setup script downloads files from S3
+9. Docker Compose builds and starts containers
+10. Application accessible via Elastic IP
 ```
 
 ## Technologies Used
@@ -78,7 +82,7 @@ Build and deploy a Chuck Norris jokes web application using:
 
 ### 1. Auto SSH Restriction
 - Security group automatically detects deployer's public IP
-- Only allows SSH from that IP (`182.2.69.158/32`)
+- Only allows SSH from that IP (auto-updated)
 - Prevents unauthorized access
 
 ### 2. S3 Encryption
@@ -113,19 +117,28 @@ Build and deploy a Chuck Norris jokes web application using:
 - **2-container separation**: App and proxy are isolated
 
 ### Automated Deployment
-- User Data script for EC2 initialization
-- No manual SSH needed after deployment
+- Remote-exec provisioner for EC2 initialization
+- No manual SSH needed after initial setup
 - Health checks ensure application is running
+- File change detection triggers automatic deployment
 
 ### File Change Detection
 - SHA256 hash of all app/docker files
-- Triggers re-upload to S3 on changes
-- Efficient: only uploads when files change
+- Triggers re-deployment when files change
+- Efficient: only deploys when files change
+- Hash includes setup script changes
 
 ### Security by Default
 - Secrets excluded from git (`.gitignore`)
-- Example files for sensitive values (`.tfvars.example`)
+- Example variable files for sensitive values
 - Auto-detection of deployer IP for SSH
+- Encrypted S3 bucket with versioning
+
+### Provisioners
+- `provisioner "file"`: Uploads setup script to EC2
+- `provisioner "remote-exec"`: Executes setup script remotely
+- `triggers`: Force re-run on script or file changes
+- Re-runs on instance recreation
 
 ## Project Structure
 
@@ -144,16 +157,13 @@ chucknoris-jokes/
 │   ├── main.tf             # AWS resources
 │   ├── variables.tf        # Configuration
 │   ├── outputs.tf          # Outputs
-│   ├── user_data.sh        # EC2 setup script
+│   ├── terraform.tfvars    # Dev environment variables
 │   └── environments/
-│       └── dev.tfvars    # Dev environment
+│       └── dev.tfvars    # Alternative env config (not used)
 ├── scripts/                  # Automation
-│   ├── deploy.sh
-│   └── destroy.sh
+│   └── setup.sh          # Server deployment script
 ├── .gitignore              # Exclude secrets
-├── .env.example            # Env variables template
-├── AI.md                   # This file
-└── README.md                # User documentation
+└── AI.md                   # This file
 ```
 
 ## Key Implementation Details
@@ -174,38 +184,69 @@ locals {
   ]))
 }
 
-# Triggers re-upload when hash changes
-resource "null_resource" "upload_app_files" {
+# Triggers re-deployment when hash changes
+resource "null_resource" "app_setup" {
   triggers = {
+    script_sha256  = sha256(file("../scripts/setup.sh"))
     app_files_hash = local.app_files_hash
-    timestamp       = timestamp()
+    instance_id    = aws_instance.web.id
   }
 }
 ```
 
-### User Data Script Flow
+### Remote-Exec Provisioner Flow
+
+```hcl
+resource "null_resource" "app_setup" {
+  depends_on = [aws_instance.web]
+
+  # Upload setup script to EC2
+  provisioner "file" {
+    source      = "${path.module}/../scripts/setup.sh"
+    destination = "/tmp/setup.sh"
+  }
+
+  # Execute setup script remotely
+  provisioner "remote-exec" {
+    inline = [
+      "sudo bash -c 'chmod +x /tmp/setup.sh && S3_BUCKET=\"${aws_s3_bucket.app_files.bucket}\" S3_OBJECT=\"${var.s3_object_name}\" REGION=\"${var.region}\" /tmp/setup.sh && rm /tmp/setup.sh'",
+    ]
+  }
+
+  # Re-run when files or instance changes
+  triggers = {
+    script_sha256  = sha256(file("${path.module}/../scripts/setup.sh"))
+    app_files_hash = local.app_files_hash
+    instance_id    = aws_instance.web.id
+  }
+}
+```
+
+### Setup Script Flow
 
 ```bash
-1. Update system (dnf update)
-2. Install Docker (docker-ce)
-3. Install Docker Compose (standalone)
+1. Install dependencies (yum-utils, curl, git)
+2. Install Docker (amazon-linux-extras)
+3. Install Docker Compose (standalone from GitHub)
 4. Download files from S3 (app-files.tar.gz)
 5. Extract to /opt/chucknoris-jokes
-6. Run docker-compose up -d
-7. Health check (wait for /health endpoint)
-8. Display application URL
+6. Run docker-compose build
+7. Stop old containers (docker-compose down)
+8. Start new containers (docker-compose up -d)
+9. Health check (wait for /health endpoint)
+10. Display application URL
 ```
 
 ## Cost Estimation
 
 | Resource | Cost (Monthly) |
-|----------|-----------------|
+|----------|----------------|
 | EC2 t2.micro | ~$8.76 |
 | Elastic IP | ~$3.60 |
-| EBS 30GB | ~$2.40 |
+| EBS 8GB | ~$0.64 |
 | S3 Storage (~1GB) | ~$0.02 |
 | Data Transfer | Free tier: 100GB |
-| **Total** | **~$15 USD** |
+| **Total** | **~$13 USD** |
 
 **Free Tier**: EC2 and EBS are free for 12 months
 
@@ -214,19 +255,31 @@ resource "null_resource" "upload_app_files" {
 ### Quick Deploy
 ```bash
 cd terraform
-cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your AWS key pair name
 
-cd ..
-./scripts/deploy.sh
+# Configure your AWS key pair and other settings in terraform.tfvars
+
+# Initialize Terraform
+terraform init
+
+# Plan deployment
+terraform plan
+
+# Apply deployment
+terraform apply
 ```
 
 ### Manual Deploy
 ```bash
 cd terraform
+
+# Initialize (first time only)
 terraform init
-terraform plan -var-file=terraform.tfvars
-terraform apply -var-file=terraform.tfvars
+
+# Review changes
+terraform plan
+
+# Apply changes
+terraform apply -auto-approve
 
 # Get Elastic IP
 terraform output elastic_ip
@@ -235,9 +288,21 @@ terraform output elastic_ip
 curl http://<ELASTIC-IP>
 ```
 
+### Re-deploy on File Changes
+```bash
+# Modify app/ or docker/ files
+cd terraform
+
+# Terraform detects hash changes and re-deploys automatically
+terraform apply -auto-approve
+```
+
 ### Clean Up
 ```bash
-./scripts/destroy.sh
+cd terraform
+
+# Destroy all resources
+terraform destroy
 ```
 
 ## Customization
@@ -254,6 +319,13 @@ region = "us-east-1"
 instance_type = "t3.small"
 ```
 
+### Use Different SSH Key
+```hcl
+# terraform/terraform.tfvars
+key_name = "your-key-pair-name"
+ssh_private_key_path = "/path/to/your/private-key.pem"
+```
+
 ### Deploy Different Application
 1. Replace `app/` with your application
 2. Update `docker/Dockerfile` if needed
@@ -263,10 +335,10 @@ instance_type = "t3.small"
 ## Troubleshooting
 
 ### Issue: File change not detected
-**Solution**: Manually trigger re-upload:
+**Solution**: Manually trigger re-deployment:
 ```bash
 cd terraform
-terraform taint null_resource.upload_app_files
+terraform taint null_resource.app_setup
 terraform apply
 ```
 
@@ -274,19 +346,42 @@ terraform apply
 **Solution**: Check instance status and logs:
 ```bash
 # SSH into EC2
-ssh -i ~/.ssh/sulaksono-private ec2-user@<ELASTIC-IP>
+ssh -i /path/to/key.pem ec2-user@<ELASTIC-IP>
 
 # Check containers
-sudo docker ps
+docker ps
 
 # Check logs
-sudo docker-compose -f /opt/chucknoris-jokes/docker/docker-compose.yml logs
+docker logs chucknoris-jokes-app
+docker logs chucknoris-jokes-nginx
+
+# Check docker-compose logs
+cd /opt/chucknoris-jokes/docker
+docker-compose logs
 ```
 
 ### Issue: Elastic IP not attaching
 **Solution**: Check EIP association:
 ```bash
+cd terraform
+terraform output elastic_ip
+
+# Verify association
 aws ec2 describe-addresses --allocation-ids <ALLOCATION-ID>
+```
+
+### Issue: Docker Compose not found
+**Solution**: Manual installation via SSH:
+```bash
+ssh -i /path/to/key.pem ec2-user@<ELASTIC-IP>
+
+# Check docker-compose
+which docker-compose
+
+# Manually install if needed
+sudo curl -SL "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-linux-x86_64" \
+    -o /usr/local/bin/docker-compose
+sudo chmod +x /usr/local/bin/docker-compose
 ```
 
 ## Learning Outcomes
@@ -295,22 +390,61 @@ This project demonstrates:
 
 ✅ **Infrastructure as Code**: Terraform manages all AWS resources
 ✅ **Containerization**: Multi-stage Docker builds with 2-container setup
-✅ **Automation**: User Data script eliminates manual configuration
+✅ **Automation**: Remote-exec provisioner eliminates manual configuration
 ✅ **Security**: Auto SSH restriction, encryption, IAM least privilege
 ✅ **Change Detection**: Automatic file change detection with hash triggers
 ✅ **Scalability**: Elastic IP ensures consistent access
 ✅ **Best Practices**: Separation of concerns, official images, no hardcoded secrets
 ✅ **Cost Optimization**: Free tier resources, efficient container design
-✅ **Documentation**: Complete README, AI.md, inline comments
+✅ **Documentation**: Complete AI.md, inline comments
+✅ **Flexible Deployment**: Triggers allow re-deployment without recreation
 
 ## Future Enhancements
 
-1. **HTTPS**: Add SSL certificates (Let's Encrypt)
+1. **HTTPS**: Add SSL certificates (Let's Encrypt or ACM)
 2. **CI/CD**: GitHub Actions for automated deployments
 3. **Monitoring**: CloudWatch logs and metrics
 4. **Auto-scaling**: Auto-scaling group for high availability
 5. **Blue-green deployment**: Zero-downtime updates
 6. **Multiple environments**: Staging and production configs
+7. **ECR**: Container registry for image versioning
+8. **Load Balancer**: Application Load Balancer for distribution
+
+## Why Docker Compose Build vs ECR
+
+### Current Approach: `docker-compose build` on EC2
+
+**Justification for this project:**
+- **Single instance deployment**: Only one EC2 instance needs images
+- **Small/simple app**: Fast build times on EC2
+- **Development environment**: Rapid iteration more important than optimization
+- **No CI/CD pipeline**: Manual deployment means build-and-deploy in one step
+- **Cost efficiency**: No ECR storage/transfer costs
+- **Simplicity**: Easier to understand and debug
+
+**Pros:**
+- Simpler - no registry management needed
+- Faster for small projects (no push/pull overhead)
+- No additional AWS costs
+- Works well for single-instance deployments
+- Easier to debug (build logs visible during deployment)
+
+**Cons:**
+- Slower builds (EC2 resources may be limited)
+- Builds happen repeatedly on every deployment
+- No image versioning/history
+- Difficult to scale (other instances can't reuse built images)
+- Image rebuilds waste compute resources
+
+### When ECR Would Be Better
+
+Consider ECR if:
+- Multiple instances/containers need same images
+- Building is slow or resource-intensive
+- Need image versioning and rollback capabilities
+- Implementing CI/CD pipeline
+- Deploying to multiple environments (dev/staging/prod)
+- Need image scanning and security compliance
 
 ## Assessment Criteria Met
 
@@ -322,18 +456,19 @@ This project demonstrates:
 | Runs in Docker container | ✅ Multi-container setup |
 | Alpine Linux base image | ✅ Alpine 3.19 |
 | Webserver as proxy | ✅ Official Nginx |
-| IaC (Terraform + Ansible) | ✅ Terraform (simplified) |
-| IaC solution is reusable | ✅ Variables, templates |
-| No pre-built Docker images | ✅ Built from source |
-| README with manual | ✅ Comprehensive docs |
+| IaC (Terraform) | ✅ All AWS resources |
+| IaC solution is reusable | ✅ Variables, modular design |
+| No pre-built Docker images | ✅ Built from source on EC2 |
+| README with manual | ✅ Comprehensive docs (AI.md) |
 | Use existing SSH key | ✅ Configured via variables |
 | Auto-detect deployer IP | ✅ Security group restriction |
 | S3 for file storage | ✅ Encrypted, versioned |
 | File change detection | ✅ SHA256 hash triggers |
+| Automated deployment | ✅ Remote-exec provisioners |
 
 ---
 
 **Built by AI** - This project was created by an AI assistant for DevOps assessment purposes.
 
 **Date**: 2026-03-02  
-**Version**: 1.0.0
+**Version**: 2.0.0 (Updated for remote-exec deployment)
