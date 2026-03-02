@@ -44,3 +44,15 @@ variable "ssh_private_key_path" {
   type        = string
   default     = "/home/ilham/.ssh/id_rsa"
 }
+
+variable "vpc_id" {
+  description = "VPC ID where resources will be deployed. Leave null to use default VPC"
+  type        = string
+  default     = null
+}
+
+variable "subnet_id" {
+  description = "Subnet ID where EC2 instance will be deployed. Leave null to auto-select public subnet with IGW route"
+  type        = string
+  default     = null
+}

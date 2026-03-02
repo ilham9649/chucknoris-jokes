@@ -21,17 +21,70 @@ data "aws_vpc" "default" {
   default = true
 }
 
+data "aws_vpc" "custom" {
+  count = var.vpc_id != null ? 1 : 0
+  id    = var.vpc_id
+}
+
+data "aws_internet_gateway" "default" {
+  filter {
+    name   = "attachment.vpc-id"
+    values = [local.vpc_id]
+  }
+}
+
+data "aws_route_tables" "public" {
+  vpc_id = local.vpc_id
+
+  filter {
+    name   = "route.destination-cidr-block"
+    values = ["0.0.0.0/0"]
+  }
+
+  filter {
+    name   = "route.gateway-id"
+    values = ["igw-*"]
+  }
+}
+
+data "aws_route_table" "public_main" {
+  count  = length(data.aws_route_tables.public.ids)
+  vpc_id = local.vpc_id
+
+  filter {
+    name   = "association.main"
+    values = ["true"]
+  }
+
+  filter {
+    name   = "route.destination-cidr-block"
+    values = ["0.0.0.0/0"]
+  }
+
+  filter {
+    name   = "route.gateway-id"
+    values = ["igw-*"]
+  }
+}
+
 data "aws_subnets" "default" {
   filter {
     name   = "vpc-id"
-    values = [data.aws_vpc.default.id]
+    values = [local.vpc_id]
+  }
+  filter {
+    name   = "map-public-ip-on-launch"
+    values = ["true"]
   }
 }
 
 locals {
+  vpc_id            = var.vpc_id != null ? var.vpc_id : data.aws_vpc.default.id
+  public_subnet_ids = length(data.aws_route_table.public_main) > 0 ? [for assoc in data.aws_route_table.public_main[0].associations : assoc.subnet_id if assoc.subnet_id != null] : []
   ssh_allowed_cidrs = var.allowed_ssh_cidr != null ? var.allowed_ssh_cidr : ["${chomp(data.http.my_public_ip.response_body)}/32"]
   s3_bucket_name    = "${var.project_name}-${var.environment}-${random_id.bucket_suffix.hex}"
-  default_subnet_id = data.aws_subnets.default.ids[0]
+  auto_subnet_id    = length(local.public_subnet_ids) > 0 ? local.public_subnet_ids[0] : data.aws_subnets.default.ids[0]
+  subnet_id         = var.subnet_id != null ? var.subnet_id : local.auto_subnet_id
   app_files_hash = sha256(join("", [
     filesha256("${path.module}/../app/server.py"),
     filesha256("${path.module}/../app/requirements.txt"),
@@ -41,6 +94,19 @@ locals {
     filesha256("${path.module}/../docker/docker-compose.yml"),
     filesha256("${path.module}/../docker/nginx.conf"),
   ]))
+}
+
+resource "null_resource" "validate_subnet" {
+  triggers = {
+    subnet_id = local.subnet_id
+  }
+
+  lifecycle {
+    precondition {
+      condition     = var.subnet_id != null ? true : length(local.public_subnet_ids) > 0
+      error_message = var.subnet_id != null ? "Using custom subnet ID." : "No public subnets found with Internet Gateway route in VPC. Ensure your VPC has subnets with public IP assignment and route to IGW (0.0.0.0/0)."
+    }
+  }
 }
 
 data "aws_ami" "amazon_linux_2" {
@@ -153,7 +219,7 @@ resource "aws_iam_instance_profile" "ec2_profile" {
 resource "aws_security_group" "web_sg" {
   name        = "${var.project_name}-sg-${var.environment}"
   description = "Security group for ${var.project_name} - managed by Terraform"
-  vpc_id      = data.aws_vpc.default.id
+  vpc_id      = local.vpc_id
 
   ingress {
     description = "SSH (restricted to deployer IP)"
@@ -210,7 +276,7 @@ resource "aws_instance" "web" {
   instance_type          = var.instance_type
   key_name               = var.key_name
   iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
-  subnet_id              = local.default_subnet_id
+  subnet_id              = local.subnet_id
   vpc_security_group_ids = [aws_security_group.web_sg.id]
 
   tags = {

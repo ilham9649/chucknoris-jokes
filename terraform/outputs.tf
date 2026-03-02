@@ -24,13 +24,13 @@ output "security_group_id" {
 }
 
 output "vpc_id" {
-  description = "ID of the default VPC"
-  value       = data.aws_vpc.default.id
+  description = "ID of the VPC used"
+  value       = local.vpc_id
 }
 
 output "subnet_id" {
   description = "ID of the subnet used"
-  value       = local.default_subnet_id
+  value       = local.subnet_id
 }
 
 output "ssh_command" {
