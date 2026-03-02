@@ -10,11 +10,15 @@ echo "  Chuck Norris Jokes - Setup Script"
 echo "========================================="
 
 echo "[$(date +%H:%M:%S)] Installing dependencies..."
-sudo dnf install -y dnf-utils curl git
+sudo yum install -y yum-utils curl git
 
 echo "[$(date +%H:%M:%S)] Installing Docker..."
-sudo dnf config-manager --add-repo=https://download.docker.com/linux/centos/docker-ce.repo
-sudo dnf install -y docker-ce docker-ce-cli containerd.io docker-compose-plugin
+sudo rm -f /etc/yum.repos.d/docker-ce.repo
+sudo amazon-linux-extras install docker -y
+sudo yum install -y docker
+sudo systemctl start docker
+sudo systemctl enable docker
+sudo usermod -aG docker ec2-user
 
 echo "[$(date +%H:%M:%S)] Starting Docker service..."
 sudo systemctl start docker
@@ -22,9 +26,11 @@ sudo systemctl enable docker
 
 echo "[$(date +%H:%M:%S)] Installing Docker Compose (standalone)..."
 curl -SL "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-linux-x86_64" \
-    -o /tmp/docker-compose \
-    --chmod +x /tmp/docker-compose
+    -o /tmp/docker-compose
+sudo chmod +x /tmp/docker-compose
 sudo mv /tmp/docker-compose /usr/local/bin/docker-compose
+
+export PATH="/usr/local/bin:$PATH"
 
 echo "[$(date +%H:%M:%S)] Creating application directory..."
 sudo mkdir -p "$APP_DIR"

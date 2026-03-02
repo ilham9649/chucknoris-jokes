@@ -228,7 +228,7 @@ resource "null_resource" "app_setup" {
     type        = "ssh"
     host        = aws_instance.web.public_ip
     user        = "ec2-user"
-    private_key = file(var.ssh_private_key_path)
+    private_key = var.ssh_private_key_path != "" ? file(var.ssh_private_key_path) : null
   }
 
   provisioner "file" {
@@ -238,12 +238,7 @@ resource "null_resource" "app_setup" {
 
   provisioner "remote-exec" {
     inline = [
-      "chmod +x /tmp/setup.sh",
-      "S3_BUCKET=\"${aws_s3_bucket.app_files.bucket}\"",
-      "S3_OBJECT=\"${var.s3_object_name}\"",
-      "REGION=\"${var.region}\"",
-      "sudo bash /tmp/setup.sh",
-      "rm /tmp/setup.sh",
+      "sudo bash -c 'chmod +x /tmp/setup.sh && S3_BUCKET=\"${aws_s3_bucket.app_files.bucket}\" S3_OBJECT=\"${var.s3_object_name}\" REGION=\"${var.region}\" /tmp/setup.sh && rm /tmp/setup.sh'",
     ]
   }
 
