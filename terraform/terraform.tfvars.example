@@ -1,0 +1,12 @@
+# Copy this file to terraform.tfvars and update the values
+# IMPORTANT: Never commit terraform.tfvars to version control
+
+region            = "ap-southeast-3"
+instance_type     = "t2.micro"
+key_name          = "your-existing-key-pair-name"  # Replace with your AWS key pair name
+environment       = "dev"
+project_name      = "chucknoris-jokes"
+
+# Security: Leave null to auto-detect your current public IP
+# Or specify specific IPs: allowed_ssh_cidr = ["203.0.113.0/24"]
+allowed_ssh_cidr  = null
