@@ -32,3 +32,15 @@ variable "allowed_ssh_cidr" {
   type        = list(string)
   default     = null
 }
+
+variable "s3_object_name" {
+  description = "Name of the S3 object containing the application files archive"
+  type        = string
+  default     = "app-files.tar.gz"
+}
+
+variable "ssh_private_key_path" {
+  description = "Path to the SSH private key for connecting to the EC2 instance"
+  type        = string
+  default     = "/home/ilham/.ssh/id_rsa"
+}
