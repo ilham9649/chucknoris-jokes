@@ -48,13 +48,13 @@ locals {
   ]))
 }
 
-data "aws_ami" "amazon_linux_2023" {
+data "aws_ami" "amazon_linux_2" {
   most_recent = true
   owners      = ["amazon"]
 
   filter {
     name   = "name"
-    values = ["al2023-ami-*-x86_64"]
+    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
   }
 
   filter {
@@ -210,17 +210,16 @@ resource "aws_eip" "web_eip" {
 }
 
 resource "aws_instance" "web" {
-  ami                  = data.aws_ami.amazon_linux_2023.id
-  instance_type        = var.instance_type
-  key_name             = var.key_name
-  iam_instance_profile = aws_iam_instance_profile.ec2_profile.name
-  subnet_id            = local.default_subnet_id
+  ami           = data.aws_ami.amazon_linux_2.id
+  instance_type = var.instance_type
+  key_name      = var.key_name
+  subnet_id     = local.default_subnet_id
 
   vpc_security_group_ids = [aws_security_group.web_sg.id]
 
   user_data = templatefile("${path.module}/user_data.sh", {
-    s3_bucket = aws_s3_bucket.app_files.bucket
-    s3_object = "app-files.zip"
+    S3_BUCKET = aws_s3_bucket.app_files.bucket
+    S3_OBJECT = "app-files.tar.gz"
   })
 
   tags = {
@@ -228,12 +227,6 @@ resource "aws_instance" "web" {
     Environment = var.environment
     Project     = var.project_name
     ManagedBy   = "Terraform"
-  }
-
-  root_block_device {
-    volume_size = 8
-    volume_type = "gp3"
-    encrypted   = true
   }
 }
 
@@ -252,13 +245,14 @@ resource "null_resource" "upload_app_files" {
 
   provisioner "local-exec" {
     command = <<EOT
-      # Create app zip file
+      # Create app tar file (using tar instead of zip)
       cd "${path.module}/.."
-      rm -f app-files.zip
-      zip -r app-files.zip app/ docker/ -x "*.git*" "*__pycache__*" "*.pyc"
+      rm -f app-files.tar.gz
+      tar --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
+        -czf app-files.tar.gz app/ docker/
 
       # Upload to S3
-      aws s3 cp app-files.zip s3://${aws_s3_bucket.app_files.bucket}/app-files.zip \
+      aws s3 cp app-files.tar.gz s3://${aws_s3_bucket.app_files.bucket}/app-files.tar.gz \
         --region ${var.region}
 
       echo "App files uploaded to S3 bucket: ${aws_s3_bucket.app_files.bucket}"
