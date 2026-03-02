@@ -6,10 +6,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    http = {
-      source  = "hashicorp/http"
-      version = "~> 3.4"
-    }
   }
 }
 
@@ -36,7 +32,6 @@ locals {
   ssh_allowed_cidrs = var.allowed_ssh_cidr != null ? var.allowed_ssh_cidr : ["${chomp(data.http.my_public_ip.response_body)}/32"]
   s3_bucket_name    = "${var.project_name}-${var.environment}-${random_id.bucket_suffix.hex}"
   default_subnet_id = data.aws_subnets.default.ids[0]
-
   app_files_hash = sha256(join("", [
     filesha256("${path.module}/../app/server.py"),
     filesha256("${path.module}/../app/requirements.txt"),
@@ -114,6 +109,7 @@ resource "aws_iam_role" "ec2_role" {
     Name        = "${var.project_name}-ec2-role"
     Environment = var.environment
     Project     = var.project_name
+    ManagedBy   = "Terraform"
   }
 }
 
@@ -210,17 +206,12 @@ resource "aws_eip" "web_eip" {
 }
 
 resource "aws_instance" "web" {
-  ami           = data.aws_ami.amazon_linux_2.id
-  instance_type = var.instance_type
-  key_name      = var.key_name
-  subnet_id     = local.default_subnet_id
-
+  ami                    = data.aws_ami.amazon_linux_2.id
+  instance_type          = var.instance_type
+  key_name               = var.key_name
+  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+  subnet_id              = local.default_subnet_id
   vpc_security_group_ids = [aws_security_group.web_sg.id]
-
-  user_data = templatefile("${path.module}/user_data.sh", {
-    S3_BUCKET = aws_s3_bucket.app_files.bucket
-    S3_OBJECT = "app-files.tar.gz"
-  })
 
   tags = {
     Name        = "${var.project_name}-${var.environment}"
@@ -230,32 +221,40 @@ resource "aws_instance" "web" {
   }
 }
 
+resource "null_resource" "app_setup" {
+  depends_on = [aws_instance.web]
+
+  connection {
+    type        = "ssh"
+    host        = aws_instance.web.public_ip
+    user        = "ec2-user"
+    private_key = file(var.ssh_private_key_path)
+  }
+
+  provisioner "file" {
+    source      = "${path.module}/../scripts/setup.sh"
+    destination = "/tmp/setup.sh"
+  }
+
+  provisioner "remote-exec" {
+    inline = [
+      "chmod +x /tmp/setup.sh",
+      "S3_BUCKET=\"${aws_s3_bucket.app_files.bucket}\"",
+      "S3_OBJECT=\"${var.s3_object_name}\"",
+      "REGION=\"${var.region}\"",
+      "sudo bash /tmp/setup.sh",
+      "rm /tmp/setup.sh",
+    ]
+  }
+
+  triggers = {
+    script_sha256  = sha256(file("${path.module}/../scripts/setup.sh"))
+    app_files_hash = local.app_files_hash
+    instance_id    = aws_instance.web.id
+  }
+}
+
 resource "aws_eip_association" "web_eip_association" {
   instance_id   = aws_instance.web.id
   allocation_id = aws_eip.web_eip.id
-}
-
-resource "null_resource" "upload_app_files" {
-  depends_on = [aws_s3_bucket.app_files]
-
-  triggers = {
-    app_files_hash = local.app_files_hash
-    timestamp      = timestamp()
-  }
-
-  provisioner "local-exec" {
-    command = <<EOT
-      # Create app tar file (using tar instead of zip)
-      cd "${path.module}/.."
-      rm -f app-files.tar.gz
-      tar --exclude='.git' --exclude='__pycache__' --exclude='*.pyc' \
-        -czf app-files.tar.gz app/ docker/
-
-      # Upload to S3
-      aws s3 cp app-files.tar.gz s3://${aws_s3_bucket.app_files.bucket}/app-files.tar.gz \
-        --region ${var.region}
-
-      echo "App files uploaded to S3 bucket: ${aws_s3_bucket.app_files.bucket}"
-    EOT
-  }
 }
