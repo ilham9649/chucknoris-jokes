@@ -10,43 +10,50 @@ When working on this project, the AI assistant must follow these rules:
 - **Correct Action**: Only delete state files (`terraform.tfstate`, `terraform.tfstate.backup`, `.terraform.lock.hcl`)
 - **Command**: `rm -f terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl`
 
-### 2. Use Best Practices
+### 2. Do NOT Delete Terraform State Files
+- **Rule**: Never delete `terraform.tfstate` or `terraform.lock.hcl` files
+- **Reason**: State files track infrastructure state; deleting them causes Terraform to lose all resource information
+- **Impact**: Without state, Terraform can't manage or destroy existing resources properly
+- **Correct Action**: Use `terraform state list` to check state, `terraform refresh` to update state
+- **Command**: `terraform state rm <resource.address>` to remove specific resources from state
+
+### 3. Use Best Practices
 - **Security**: Never commit secrets or API keys; use `.gitignore` for sensitive files
 - **Code Style**: Follow existing conventions; don't add unnecessary comments
 - **Terraform**: Use resource dependencies, not `time_sleep` or `null_resource` with `triggers` for sequencing
 - **Docker**: Use official base images (Alpine), multi-stage builds for smaller images
 - **AWS**: Follow least privilege principle for IAM roles and policies
 
-### 3. Clean Up Existing Resources Before Re-apply
+### 4. Clean Up Existing Resources Before Re-apply
 - **Rule**: When resources exist in AWS with same names, delete them first
 - **Reason**: Prevents "EntityAlreadyExists" or "InvalidGroup.Duplicate" errors
 - **Approach**: Use `aws <service> delete-*` commands or `terraform destroy` before fresh apply
 
-### 4. Mermaid Diagrams Over ASCII Art
+### 5. Mermaid Diagrams Over ASCII Art
 - **Rule**: Use Mermaid.js for diagrams in markdown files
 - **Reason**: Renders beautifully on GitHub and markdown platforms
 - **Avoid**: Complex ASCII art with special characters that break on different terminals
 
-### 5. File Paths in Terraform
+### 6. File Paths in Terraform
 - **Rule**: Always use `${path.module}` prefix for relative paths
 - **Reason**: Terraform runs from terraform/ directory, but `path.module` resolves correctly
 - **Example**: `filesha256("${path.module}/../app/server.py")` not `filesha256("app/server.py")`
 
-### 6. Terraform-Native vs Shell Commands
+### 7. Terraform-Native vs Shell Commands
 - **Rule**: `archive_file` provider cannot archive directories directly with `content` attribute
 - **Reason**: `archive_file` `source.content` only accepts file paths, not directories
 - **Workaround**: Use `null_resource` with `tar` command to create archive
 - **Example**: `null_resource` + `tar` + `aws s3 cp` for reliable directory archiving
 
-### 7. SSM Document Parameters
+### 8. SSM Document Parameters
 - **Rule**: Parameter names must be alphanumeric (no underscores) for schema version 2.2
 - **Reason**: AWS SSM API validation rejects `S3_BUCKET`, use `S3Bucket`
 - **Convention**: Use PascalCase for parameter names
 
-### 8. SSM Association Configuration
+### 9. SSM Association Configuration
 - **Rule**: Use `targets` parameter, not deprecated `instance_id`
 - **Reason**: AWS provider v5.0+ uses `targets` with `key = "InstanceIds"`
-- **Example**: 
+- **Example**:
   ```hcl
   targets {
     key    = "InstanceIds"
@@ -54,7 +61,7 @@ When working on this project, the AI assistant must follow these rules:
   }
   ```
 
-### 9. AWS Resource Naming
+### 10. AWS Resource Naming
 - **Rule**: Follow consistent naming pattern with environment suffix
 - **Pattern**: `<project-name>-<resource>-<environment>`
 - **Examples**:
@@ -62,22 +69,22 @@ When working on this project, the AI assistant must follow these rules:
   - `chucknoris-jokes-ec2-role-dev`
   - `chucknoris-setup-dev`
 
-### 9. Git Workflow
+### 11. Git Workflow
 - **Rule**: Never commit `terraform.tfvars`, `.env`, or state files
 - **Reason**: These contain sensitive values (API keys, access tokens)
 - **Action**: These files must be in `.gitignore`
 
-### 10. S3 Bucket Naming
+### 12. S3 Bucket Naming
 - **Rule**: Bucket names must match regex `^[a-zA-Z0-9.\-_]{1,255}$`
 - **Avoid**: Special characters, uppercase letters (AWS S3 is lowercase-only)
 - **Pattern**: `chucknoris-jokes-dev-appfiles-<random-id>`
 
-### 11. Route Table Validation
+### 13. Route Table Validation
 - **Rule**: Include route table data sources to validate public subnet
 - **Reason**: Ensures subnet has IGW route (0.0.0.0/0 → IGW) for internet access
 - **Data Sources**: `aws_route_tables` and `aws_route_table` with IGW filters
 
-### 12. IAM Policy Resource Naming
+### 14. IAM Policy Resource Naming
 - **Rule**: When policies are deleted manually, terraform import may be needed
 - **Alternative**: Use `terraform destroy` to clean up all resources including IAM policies
 - **Caution**: IAM policies with same name in different regions can cause conflicts
