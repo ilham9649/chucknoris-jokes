@@ -11,8 +11,9 @@ variable "instance_type" {
 }
 
 variable "key_name" {
-  description = "Name of existing SSH key pair in AWS"
+  description = "Name of existing SSH key pair in AWS (optional when using AWS SSM)"
   type        = string
+  default     = null
 }
 
 variable "environment" {
@@ -37,12 +38,6 @@ variable "s3_object_name" {
   description = "Name of the S3 object containing the application files archive"
   type        = string
   default     = "app-files.tar.gz"
-}
-
-variable "ssh_private_key_path" {
-  description = "Path to the SSH private key for connecting to the EC2 instance"
-  type        = string
-  default     = "/home/ilham/.ssh/id_rsa"
 }
 
 variable "vpc_id" {

@@ -4,7 +4,15 @@ terraform {
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = "~> 6.0"
+    }
+    http = {
+      source  = "hashicorp/http"
+      version = "~> 3.0"
+    }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.0"
     }
   }
 }
@@ -33,40 +41,6 @@ data "aws_internet_gateway" "default" {
   }
 }
 
-data "aws_route_tables" "public" {
-  vpc_id = local.vpc_id
-
-  filter {
-    name   = "route.destination-cidr-block"
-    values = ["0.0.0.0/0"]
-  }
-
-  filter {
-    name   = "route.gateway-id"
-    values = ["igw-*"]
-  }
-}
-
-data "aws_route_table" "public_main" {
-  count  = length(data.aws_route_tables.public.ids)
-  vpc_id = local.vpc_id
-
-  filter {
-    name   = "association.main"
-    values = ["true"]
-  }
-
-  filter {
-    name   = "route.destination-cidr-block"
-    values = ["0.0.0.0/0"]
-  }
-
-  filter {
-    name   = "route.gateway-id"
-    values = ["igw-*"]
-  }
-}
-
 data "aws_subnets" "default" {
   filter {
     name   = "vpc-id"
@@ -80,11 +54,13 @@ data "aws_subnets" "default" {
 
 locals {
   vpc_id            = var.vpc_id != null ? var.vpc_id : data.aws_vpc.default.id
-  public_subnet_ids = length(data.aws_route_table.public_main) > 0 ? [for assoc in data.aws_route_table.public_main[0].associations : assoc.subnet_id if assoc.subnet_id != null] : []
   ssh_allowed_cidrs = var.allowed_ssh_cidr != null ? var.allowed_ssh_cidr : ["${chomp(data.http.my_public_ip.response_body)}/32"]
-  s3_bucket_name    = "${var.project_name}-${var.environment}-${random_id.bucket_suffix.hex}"
-  auto_subnet_id    = length(local.public_subnet_ids) > 0 ? local.public_subnet_ids[0] : data.aws_subnets.default.ids[0]
-  subnet_id         = var.subnet_id != null ? var.subnet_id : local.auto_subnet_id
+  s3_bucket_name    = "${var.project_name}-${var.environment}-appfiles-${random_id.bucket_suffix.dec}"
+
+  subnet_id = var.subnet_id != null ? var.subnet_id : (
+    length(data.aws_subnets.default.ids) > 0 ? data.aws_subnets.default.ids[0] : null
+  )
+
   app_files_hash = sha256(join("", [
     filesha256("${path.module}/../app/server.py"),
     filesha256("${path.module}/../app/requirements.txt"),
@@ -103,8 +79,8 @@ resource "null_resource" "validate_subnet" {
 
   lifecycle {
     precondition {
-      condition     = var.subnet_id != null ? true : length(local.public_subnet_ids) > 0
-      error_message = var.subnet_id != null ? "Using custom subnet ID." : "No public subnets found with Internet Gateway route in VPC. Ensure your VPC has subnets with public IP assignment and route to IGW (0.0.0.0/0)."
+      condition     = local.subnet_id != null
+      error_message = "No valid subnet ID found. Either provide subnet_id variable or ensure your VPC has public subnets with map-public-ip-on-launch enabled."
     }
   }
 }
@@ -287,31 +263,50 @@ resource "aws_instance" "web" {
   }
 }
 
-resource "null_resource" "app_setup" {
-  depends_on = [aws_instance.web]
+resource "aws_ssm_document" "app_setup" {
+  name            = "chucknoris-setup-${var.environment}"
+  document_type   = "Command"
+  document_format = "YAML"
 
-  connection {
-    type        = "ssh"
-    host        = aws_instance.web.public_ip
-    user        = "ec2-user"
-    private_key = var.ssh_private_key_path != "" ? file(var.ssh_private_key_path) : null
+  content = templatefile("${path.module}/ssm-document.yaml", {
+    S3Bucket = aws_s3_bucket.app_files.bucket
+    S3Object = var.s3_object_name
+    Region   = var.region
+  })
+}
+
+resource "null_resource" "upload_app_files" {
+  depends_on = [aws_s3_bucket.app_files]
+
+  provisioner "local-exec" {
+    command = "tar -czf /tmp/app-files.tar.gz ${path.module}/app ${path.module}/docker && aws s3 cp /tmp/app-files.tar.gz s3://${aws_s3_bucket.app_files.bucket}/${var.s3_object_name} --region ${var.region} && rm -f /tmp/app-files.tar.gz"
+  }
+}
+
+resource "aws_ssm_association" "app_setup" {
+  name = aws_ssm_document.app_setup.name
+
+  targets {
+    key    = "InstanceIds"
+    values = [aws_instance.web.id]
   }
 
-  provisioner "file" {
-    source      = "${path.module}/../scripts/setup.sh"
-    destination = "/tmp/setup.sh"
+  parameters = {
+    S3Bucket = aws_s3_bucket.app_files.bucket
+    S3Object = var.s3_object_name
+    Region   = var.region
   }
+}
 
-  provisioner "remote-exec" {
-    inline = [
-      "sudo bash -c 'chmod +x /tmp/setup.sh && S3_BUCKET=\"${aws_s3_bucket.app_files.bucket}\" S3_OBJECT=\"${var.s3_object_name}\" REGION=\"${var.region}\" /tmp/setup.sh && rm /tmp/setup.sh'",
-    ]
-  }
+resource "null_resource" "app_setup_trigger" {
+  depends_on = [aws_ssm_association.app_setup]
 
   triggers = {
-    script_sha256  = sha256(file("${path.module}/../scripts/setup.sh"))
     app_files_hash = local.app_files_hash
-    instance_id    = aws_instance.web.id
+  }
+
+  provisioner "local-exec" {
+    command = "echo 'SSM Document applied with hash: ${local.app_files_hash}'"
   }
 }
 

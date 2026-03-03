@@ -33,9 +33,9 @@ output "subnet_id" {
   value       = local.subnet_id
 }
 
-output "ssh_command" {
-  description = "SSH command to connect to the instance"
-  value       = "ssh -i /path/to/your/private-key.pem ec2-user@${aws_eip.web_eip.public_ip}"
+output "ssm_command" {
+  description = "AWS SSM command to connect to the instance"
+  value       = "aws ssm start-session --target ${aws_instance.web.id} --region ${var.region}"
 }
 
 output "application_url" {

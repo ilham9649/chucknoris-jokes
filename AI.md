@@ -157,11 +157,12 @@ chucknoris-jokes/
 │   ├── main.tf             # AWS resources
 │   ├── variables.tf        # Configuration
 │   ├── outputs.tf          # Outputs
+│   ├── ssm-document.yaml  # SSM Command document
 │   ├── terraform.tfvars    # Dev environment variables
 │   └── environments/
 │       └── dev.tfvars    # Alternative env config (not used)
-├── scripts/                  # Automation
-│   └── setup.sh          # Server deployment script
+├── scripts/                  # Automation (backup/reference)
+│   └── setup.sh          # Legacy deployment script
 ├── .gitignore              # Exclude secrets
 └── AI.md                   # This file
 ```

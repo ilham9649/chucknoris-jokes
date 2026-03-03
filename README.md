@@ -4,13 +4,14 @@ A fully automated deployment pipeline demonstrating Infrastructure as Code (IaC)
 
 ## Overview
 
-This project displays random Chuck Norris jokes fetched from the [Chuck Norris API](https://api.chucknorris.io/) and demonstrates:
+This project displays random Chuck Norris jokes fetched from [Chuck Norris API](https://api.chucknorris.io/) and demonstrates:
 
 - **Terraform** - Infrastructure as Code (AWS EC2, Security Groups, S3, IAM)
 - **Docker** - Containerization with 2 containers (Flask app + Nginx proxy)
-- **Remote-Exec Provisioners** - Automated server configuration
+- **AWS SSM** - Secure instance access and script execution without SSH keys
+- **SSM Document + Association** - Automated server configuration
 - **S3** - Application file storage
-- **Auto SSH Security** - Security group auto-detects your public IP
+- **Auto SSH Security** - Security group auto-detects your public IP (optional)
 
 ## Architecture
 
@@ -30,13 +31,13 @@ This project displays random Chuck Norris jokes fetched from the [Chuck Norris A
 ┌─────────┼───────────────────────────────────────────────────────────┐
 │         ▼            AWS Cloud (ap-southeast-3)                  │
 │  ┌──────────────────────────────────────────────────────────────┐   │
-│  │         Security Group (SSH from your IP)                  │   │
+│  │         Security Group (SSH/SSM optional)               │   │
 │  └────────────────┬───────────────────────────────────────────┘   │
 │                   │                                              │
 │  ┌────────────────▼──────────────────────────────────────┐       │
 │  │         EC2 (t2.micro) - Amazon Linux 2            │       │
 │  │  ┌──────────────────────────────────────────────────┐│       │
-│  │  │  Setup Script (remote-exec)                    ││       │
+│  │  │  SSM Document (runs via SSM Association)   ││       │
 │  │  │  1. Install Docker                           ││       │
 │  │  │  2. Download from S3                        ││       │
 │  │  │  3. Run docker-compose                       ││       │
@@ -58,6 +59,9 @@ This project displays random Chuck Norris jokes fetched from the [Chuck Norris A
 │  │         S3 Bucket (App Files)                │          │
 │  │         app-files.tar.gz                     │          │
 │  └────────────────────────────────────────────────┘          │
+│                                                            │
+│  Setup Execution: SSM Document + Association (no user data)  │
+│  Instance Access: AWS SSM (secure, no SSH key needed)       │
 └──────────────────────────────────────────────────────────────────┘
 ```
 
@@ -68,7 +72,8 @@ This project displays random Chuck Norris jokes fetched from the [Chuck Norris A
 - AWS CLI configured with credentials
 - Terraform >= 1.0
 - Docker >= 20.10 (for local testing)
-- Existing SSH key pair in AWS
+- SSH key pair in AWS (optional, only needed for SSH access)
+- AWS Session Manager plugin (recommended, for SSM access)
 
 ### Deployment
 
@@ -98,17 +103,18 @@ Edit `terraform/terraform.tfvars`:
 ```hcl
 region            = "ap-southeast-3"
 instance_type     = "t3.nano"
-key_name          = "your-aws-key-pair-name"
+key_name          = null  # Optional, set to use SSH
 allowed_ssh_cidr  = null  # Auto-detects your public IP
 ```
 
 ## Features
 
-- **Auto SSH Security**: Security group restricts SSH to your current IP
+- **AWS SSM Access**: Secure instance access without SSH keys
+- **SSM Document Execution**: Automated server configuration via SSM (no user data)
+- **Auto SSH Security (Optional)**: Security group restricts SSH to your current IP
 - **2-Container Docker**: Flask app + official Nginx proxy
 - **S3 Storage**: Encrypted app files with versioning
-- **Remote-Exec Deployment**: No Ansible needed
-- **IAM Roles**: Minimal permissions for EC2
+- **IAM Roles**: Minimal permissions for EC2 and SSM
 - **File Change Detection**: Auto re-deploys when files change
 - **Elastic IP**: Static public IP for consistent access
 
@@ -129,9 +135,10 @@ chucknoris-jokes/
 │   ├── main.tf             # AWS resources
 │   ├── variables.tf        # Configuration
 │   ├── outputs.tf          # Outputs
+│   ├── ssm-document.yaml  # SSM Command document
 │   └── terraform.tfvars    # Dev environment variables
-├── scripts/                  # Automation
-│   └── setup.sh          # Server deployment script
+├── scripts/                  # Automation (backup/reference)
+│   └── setup.sh          # Legacy deployment script
 ├── .gitignore              # Exclude secrets
 ├── .env.example            # Environment variables example
 ├── README.md               # This file
@@ -145,15 +152,17 @@ chucknoris-jokes/
 3. Terraform detects file changes (SHA256 hash)
 4. Files are zipped and uploaded to S3
 5. EC2 instance is created/recreated
-6. Terraform uploads `scripts/setup.sh` via provisioner
-7. Terraform executes `setup.sh` via remote-exec
+6. SSM Document is created with setup commands
+7. SSM Association runs the document on the instance
 8. Setup script downloads files from S3
 9. Docker Compose builds and starts containers
 10. Application accessible via Elastic IP
+11. Instance access via AWS SSM (no SSH key required)
 
 ## Security Features
 
-- **Auto SSH Restriction**: Security group automatically detects deployer's public IP
+- **AWS SSM Access**: Secure instance access without SSH keys
+- **Auto SSH Restriction (Optional)**: Security group can auto-detect deployer's public IP for SSH
 - **S3 Encryption**: AES256 encryption at rest with versioning
 - **IAM Least Privilege**: EC2 instance can only access specific S3 bucket
 - **No Secrets in Git**: Sensitive values in `.tfvars.example`, `.env.example`
@@ -192,16 +201,28 @@ terraform destroy
 
 ## Troubleshooting
 
-### SSH into EC2
+### Access EC2 via AWS SSM
 
 ```bash
-ssh -i /path/to/your/private-key.pem ec2-user@<ELASTIC-IP>
+# Install Session Manager plugin if not already installed
+# https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
+
+# Connect to instance
+aws ssm start-session --target <INSTANCE-ID> --region ap-southeast-3
+```
+
+Or use the output from Terraform:
+
+```bash
+terraform output ssm_command
 ```
 
 ### Check Container Logs
 
 ```bash
-ssh -i /path/to/your/private-key.pem ec2-user@<ELASTIC-IP>
+aws ssm start-session --target <INSTANCE-ID> --region ap-southeast-3
+
+# In the SSM session:
 cd /opt/chucknoris-jokes/docker
 docker-compose logs
 ```
@@ -210,7 +231,8 @@ docker-compose logs
 
 ```bash
 cd terraform
-terraform taint null_resource.app_setup
+# Taint the SSM association to force re-run
+terraform taint aws_ssm_association.app_setup
 terraform apply
 ```
 
