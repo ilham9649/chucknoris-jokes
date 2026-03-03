@@ -38,7 +38,7 @@ graph LR
     EIP --> EC2
     SG --> EC2
     TF -->|Upload| S3
-    TF -->|Deploy| SSM | EC2
+    TF -->|Deploy| SSM| EC2
     S3 -->|Download| EC2
     DOCKER --> NGINX
     DOCKER --> FLASK
