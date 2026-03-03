@@ -26,8 +26,7 @@ graph LR
         S3[S3 Bucket]
         EIP[Elastic IP]
         EC2[EC2 Instance]
-        SSM[SSM Association]
-        SSM_DOC[SSM Document]
+        SSM[SSM]
         
         subgraph EC2_INSIDE["Inside EC2"]
             DOCKER[Docker Compose]
@@ -40,8 +39,8 @@ graph LR
     EIP --> EC2
     SG --> EC2
     TF -->|Upload| S3
-    TF -->|Deploy| SSM_DOC
-    SSM -->|Triggers| EC2
+    TF -->|Trigger| SSM
+    SSM -->|Deploy| EC2
     S3 -->|Download| EC2
     DOCKER --> NGINX
     DOCKER --> FLASK
