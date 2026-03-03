@@ -137,7 +137,6 @@ chucknoris-jokes/
 ├── scripts/                  # Automation (backup/reference)
 │   └── setup.sh          # Legacy deployment script
 ├── .gitignore              # Exclude secrets
-├── .env.example            # Environment variables example
 ├── README.md               # This file
 └── AI.md                   # Detailed documentation
 ```
@@ -162,7 +161,7 @@ chucknoris-jokes/
 - **Auto SSH Restriction (Optional)**: Security group can auto-detect deployer's public IP for SSH
 - **S3 Encryption**: AES256 encryption at rest with versioning
 - **IAM Least Privilege**: EC2 instance can only access specific S3 bucket
-- **No Secrets in Git**: Sensitive values in `.tfvars.example`, `.env.example`
+- **No Secrets in Git**: Sensitive values in `terraform.tfvars` are git-ignored
 
 ## Cost Estimation
 
