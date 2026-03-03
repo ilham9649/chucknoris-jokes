@@ -26,6 +26,8 @@ graph LR
         S3[S3 Bucket]
         EIP[Elastic IP]
         EC2[EC2 Instance]
+        SSM[SSM Association]
+        SSM_DOC[SSM Document]
         
         subgraph EC2_INSIDE["Inside EC2"]
             DOCKER[Docker Compose]
@@ -38,7 +40,8 @@ graph LR
     EIP --> EC2
     SG --> EC2
     TF -->|Upload| S3
-    TF -->|Deploy| SSM| EC2
+    TF -->|Deploy| SSM_DOC
+    SSM -->|Triggers| EC2
     S3 -->|Download| EC2
     DOCKER --> NGINX
     DOCKER --> FLASK
@@ -48,13 +51,15 @@ graph LR
     style TF fill:#f96
     style S3 fill:#f9f
     style EC2 fill:#9f9
+    style SSM fill:#f96
+    style SSM_DOC fill:#f96
     style NGINX fill:#99f
     style FLASK fill:#99f
 ```
 
 ### Architecture Flow
 
-1. **Deployment**: Developer runs `terraform apply` → uploads files to S3 → creates EC2 instance
+1. **Deployment**: Developer runs `terraform apply` → uploads files to S3 → creates SSM Document & Association
 2. **Configuration**: SSM Association triggers SSM Document on EC2 → downloads files → runs Docker Compose
 3. **Access**: User accesses app via Elastic IP → Nginx proxy → Flask app → Chuck Norris API
 4. **Management**: AWS SSM for secure instance access (no SSH keys needed)
@@ -143,14 +148,13 @@ chucknoris-jokes/
 1. Developer modifies `app/` or `docker/` files
 2. Runs `terraform apply`
 3. Terraform detects file changes (SHA256 hash)
-4. Files are zipped and uploaded to S3
-5. EC2 instance is created/recreated
-6. SSM Document is created with setup commands
-7. SSM Association runs document on instance
-8. Setup script downloads files from S3
-9. Docker Compose builds and starts containers
-10. Application accessible via Elastic IP
-11. Instance access via AWS SSM (no SSH key required)
+4. Files are zipped (via archive_file) and uploaded to S3 (via aws_s3_object)
+5. Terraform creates EC2 instance, SSM Document, and SSM Association
+6. SSM Association triggers SSM Document on EC2 instance
+7. SSM Document executes: downloads files, installs Docker, runs Docker Compose
+8. Docker Compose builds and starts containers
+9. Application accessible via Elastic IP
+10. Instance access via AWS SSM (no SSH key required)
 
 ## Security Features
 
