@@ -37,7 +37,6 @@ graph LR
 
     USER[User] -->|HTTP| EIP
     EIP --> EC2
-    SG[Security Group] --> EC2
     TF -->|Upload| S3
     TF -->|Trigger| SSM
     SSM -->|Deploy| EC2
@@ -50,7 +49,6 @@ graph LR
     style TF fill:#f96
     style S3 fill:#f9f
     style EC2 fill:#9f9
-    style SG fill:#f96
     style SSM fill:#f96
     style NGINX fill:#99f
     style FLASK fill:#99f
