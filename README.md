@@ -143,6 +143,83 @@ allowed_ssh_cidr  = null
 - **File Change Detection**: Auto re-deploys when files change
 - **Elastic IP**: Static public IP for consistent access
 
+## Design Considerations
+
+### 1. Single Server Architecture
+- **Decision**: Use one server to host both web server (Nginx) and application server (Flask)
+- **Reasoning**: For simple systems, single server is sufficient and cost-effective
+- **Trade-off**: For complex systems requiring better security and isolation, separating web and application servers is recommended
+
+### 2. No Ansible Implementation
+- **Decision**: Not using Ansible for configuration management
+- **Reasoning**: Keeps the deployment pipeline simple and reduces complexity
+- **Trade-off**: Ansible would be advisable for more complex systems requiring advanced configuration management
+
+### 3. File Change Detection
+- **Decision**: Terraform detects code changes and triggers re-deployment without recreating EC2 instance
+- **Reasoning**: Minimizes downtime and preserves instance state
+- **Trade-off**: Brief downtime during container rebuild; SSM Association re-triggers deployment script on existing instance
+
+### 4. Default VPC Usage
+- **Decision**: Terraform will NOT create VPC - it uses AWS default VPC for simplification
+- **Reasoning**: Reduces configuration complexity and follows AWS best practices for simple deployments
+- **Trade-off**: Custom VPC configurations would provide more network isolation and control
+
+### 5. No ECR (Elastic Container Registry)
+- **Decision**: Build Docker images directly on EC2 instance, not push to ECR
+- **Reasoning**: Simpler for single-instance deployment; no additional storage/transfer costs
+- **Trade-off**: No image versioning or reuse across multiple instances; slower builds and wasted compute resources
+
+### 6. AWS SSM for Team-Friendly Access
+- **Decision**: Use AWS Systems Manager (SSM) instead of SSH for instance access
+- **Reasoning**: Eliminates need to manually add public keys to EC2 instances or manage SSH access
+- **Benefit**: More secure and team-friendly with AWS-managed authentication
+
+## Future Improvements
+
+### 1. Configuration Management
+- **Add Ansible**: Implement Ansible for advanced configuration management in complex systems
+- **Benefit**: Better idempotency, configuration reuse, and multi-server orchestration
+
+### 2. Static Frontend Approach
+- **Consider**: Build frontend-only that calls Chuck Norris API directly
+- **Architecture**: AWS CloudFront + S3 (static hosting)
+- **Benefits**:
+  - More cost-efficient (no EC2 instance)
+  - Easier to manage (no server patching/maintenance)
+  - Better scalability
+  - Lower operational overhead
+
+### 3. HTTPS Implementation
+- **Current Limitation**: HTTPS requires a domain name
+- **Future**: Add SSL/TLS certificates using AWS Certificate Manager (ACM)
+- **Benefits**: Secure data transmission, better SEO, compliance
+
+### 4. Auto Scaling Group (ASG)
+- **Add ASG**: Implement Auto Scaling Group for high availability
+- **Benefits**:
+  - Automatic scaling based on traffic
+  - Multiple instances for redundancy
+  - Load balancer integration
+- **When needed**: Application becomes complex and experiences variable traffic
+
+### 5. Terraform Backend
+- **Add Terraform Backend**: Use S3 with DynamoDB for remote state
+- **Benefits**:
+  - Team collaboration on shared infrastructure
+  - State locking to prevent conflicts
+  - Versioned state files
+  - Better security (state not stored locally)
+
+### 6. CI/CD Pipeline
+- **Add CI/CD**: Implement GitHub Actions or AWS CodePipeline
+- **Workflow**:
+  - Automated testing on code push
+  - Automatic Docker image build and push to ECR
+  - Automatic Terraform apply
+  - Rollback capabilities
+- **Benefits**: Faster deployments, reduced human error, consistent processes
+
 ## Project Structure
 
 ```
@@ -173,14 +250,15 @@ chucknoris-jokes/
 
 1. Developer modifies `app/` or `docker/` files
 2. Runs `terraform apply`
-3. Terraform detects file changes (SHA256 hash)
-4. Files are zipped (via null_resource) and uploaded to S3
-5. Terraform creates EC2 instance, SSM Document, and SSM Association
-6. SSM Association triggers SSM Document on EC2 instance
-7. SSM Document executes: downloads files, installs Docker, runs Docker Compose
-8. Docker Compose builds and starts containers
-9. Application accessible via Elastic IP
-10. Instance access via AWS SSM (no SSH key required)
+3. Terraform detects file changes (SHA256 hash) - triggers file re-upload to S3
+4. Terraform creates EC2 instance, SSM Document, and SSM Association (on first deployment)
+5. SSM Association triggers SSM Document on EC2 instance (runs on creation/recreation)
+6. SSM Document executes: downloads files, installs Docker, runs Docker Compose
+7. Docker Compose builds and starts containers
+8. Application accessible via Elastic IP
+9. Instance access via AWS SSM (no SSH key required)
+
+**Note**: EC2 instance is NOT recreated on file changes - only files are re-uploaded to S3 and SSM Association re-triggers the deployment script
 
 ## Security Features
 
@@ -197,6 +275,8 @@ chucknoris-jokes/
 cd terraform
 
 # Terraform detects hash changes and re-deploys automatically
+# Files are re-uploaded to S3 and SSM Association re-triggers deployment script
+# EC2 instance is NOT recreated
 terraform apply -auto-approve
 ```
 
