@@ -28,7 +28,6 @@ graph LR
         EC2[EC2 Instance]
         
         subgraph EC2_INSIDE["Inside EC2"]
-            SSM[SSM Document]
             DOCKER[Docker Compose]
             NGINX[Nginx<br/>:80]
             FLASK[Flask App<br/>:5000]
@@ -39,9 +38,8 @@ graph LR
     EIP --> EC2
     SG --> EC2
     TF -->|Upload| S3
-    TF -->|Deploy| EC2
+    TF -->|Deploy| SSM | EC2
     S3 -->|Download| EC2
-    SSM --> DOCKER
     DOCKER --> NGINX
     DOCKER --> FLASK
     NGINX <--> FLASK
