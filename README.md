@@ -68,7 +68,7 @@ graph LR
 ### Prerequisites
 
 - AWS CLI configured with credentials
-- Terraform >= 1.0
+- Terraform >= 1.14
 - Docker >= 20.10 (for local testing)
 - SSH key pair in AWS (optional, only needed for SSH access)
 - AWS Session Manager plugin (recommended, for SSM access)
@@ -96,13 +96,40 @@ curl http://<ELASTIC-IP>
 
 ## Configuration
 
-Edit `terraform/terraform.tfvars`:
+Copy the example file and customize your settings:
+
+```bash
+cd terraform
+cp terraform.tfvars.example terraform.tfvars
+```
+
+Edit `terraform.tfvars`:
 
 ```hcl
+# AWS Region
 region            = "ap-southeast-3"
+
+# EC2 Instance Type
 instance_type     = "t3.nano"
-key_name          = null  # Optional, set to use SSH
-allowed_ssh_cidr  = null  # Auto-detects your public IP
+
+# Project and Environment
+project_name      = "chucknoris-jokes"
+environment       = "dev"
+
+# SSH Key Pair (optional - for SSH access only, not required for SSM)
+# Create key pair in AWS EC2 console first
+key_name          = "your-existing-key-pair-name"
+
+# VPC Configuration (optional - leave null for default VPC)
+vpc_id            = null
+
+# Subnet Configuration (optional - leave null for auto-selection)
+# Subnet must have public IP assignment enabled and route to Internet Gateway
+subnet_id         = null
+
+# SSH Access Security (optional - leave null for auto-detection)
+# Auto-detects your current public IP or specify custom CIDR blocks
+allowed_ssh_cidr  = null
 ```
 
 ## Features
@@ -120,26 +147,26 @@ allowed_ssh_cidr  = null  # Auto-detects your public IP
 
 ```
 chucknoris-jokes/
-├── app/                    # Flask Application
+├── app/                        # Flask Application
 │   ├── server.py
 │   ├── templates/index.html
 │   ├── static/style.css
 │   └── requirements.txt
-├── docker/                   # Container Config
-│   ├── Dockerfile           # Flask app container
-│   ├── nginx.conf          # Nginx proxy config
-│   └── docker-compose.yml   # 2 containers
-├── terraform/                # IaC
-│   ├── main.tf             # AWS resources
-│   ├── variables.tf        # Configuration
-│   ├── outputs.tf          # Outputs
-│   ├── ssm-document.yaml  # SSM Command document
-│   └── terraform.tfvars    # Dev environment variables
-├── scripts/                  # Automation (backup/reference)
-│   └── setup.sh          # Legacy deployment script
-├── .gitignore              # Exclude secrets
-├── README.md               # This file
-└── AI.md                   # Detailed documentation
+├── docker/                     # Container Config
+│   ├── Dockerfile              # Flask app container
+│   ├── nginx.conf              # Nginx proxy config
+│   └── docker-compose.yml      # 2 containers
+├── terraform/                   # IaC
+│   ├── main.tf                 # AWS resources
+│   ├── variables.tf            # Configuration
+│   ├── outputs.tf              # Outputs
+│   ├── ssm-document.yaml       # SSM Command document
+│   └── terraform.tfvars        # Dev environment variables
+├── scripts/                    # Automation (backup/reference)
+│   └── setup.sh                # Legacy deployment script
+├── .gitignore                  # Exclude secrets
+├── README.md                   # This file
+└── AGENTS.md                   # Detailed documentation
 ```
 
 ## Deployment Workflow
@@ -162,19 +189,6 @@ chucknoris-jokes/
 - **S3 Encryption**: AES256 encryption at rest with versioning
 - **IAM Least Privilege**: EC2 instance can only access specific S3 bucket
 - **No Secrets in Git**: Sensitive values in `terraform.tfvars` are git-ignored
-
-## Cost Estimation
-
-| Resource | Cost (Monthly) |
-|----------|----------------|
-| EC2 t3.nano | ~$4.80 |
-| Elastic IP | ~$3.60 |
-| EBS 8GB | ~$0.64 |
-| S3 Storage (~1GB) | ~$0.02 |
-| Data Transfer | Free tier: 100GB |
-| **Total** | **~$9 USD** |
-
-**Free Tier**: EC2 and EBS are free for 12 months
 
 ## Re-deploy on File Changes
 
@@ -231,31 +245,6 @@ cd terraform
 terraform taint null_resource.upload_app_files
 terraform apply
 ```
-
-## Technology Stack
-
-| Technology | Purpose |
-|------------|---------|
-| Python 3.11 | Flask application |
-| Flask 3.0 | Web framework |
-| Docker | Containerization |
-| Docker Compose | Multi-container orchestration |
-| Nginx | Reverse proxy (official image) |
-| Terraform 1.0+ | Infrastructure as Code |
-| AWS S3 | File storage |
-| AWS EC2 | Compute |
-| AWS IAM | Security |
-| AWS SSM | Remote management |
-
-## Documentation
-
-For detailed documentation, see [AI.md](AI.md) which includes:
-- Complete architecture details
-- Security best practices
-- File change detection mechanism
-- Provisioner flow
-- Troubleshooting guide
-- Future enhancements
 
 ---
 
