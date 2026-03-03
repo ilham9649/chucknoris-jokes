@@ -24,7 +24,6 @@ graph LR
 
     subgraph AWS["AWS Cloud"]
         S3[S3 Bucket]
-        SG[Security Group]
         EIP[Elastic IP]
         EC2[EC2 Instance]
         
