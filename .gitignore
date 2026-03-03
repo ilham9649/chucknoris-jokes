@@ -11,6 +11,9 @@ override.tf.json
 *_override.tf
 *_override.tf.json
 
+# Application files (archived)
+*.tar.gz
+
 # Ansible
 *.log
 ansible/inventory.ini

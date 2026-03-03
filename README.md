@@ -27,7 +27,7 @@ graph LR
         EIP[Elastic IP]
         EC2[EC2 Instance]
         SSM[SSM]
-        
+
         subgraph EC2_INSIDE["Inside EC2"]
             DOCKER[Docker Compose]
             NGINX[Nginx<br/>:80]
@@ -37,7 +37,7 @@ graph LR
 
     USER[User] -->|HTTP| EIP
     EIP --> EC2
-    SG --> EC2
+    SG[Security Group] --> EC2
     TF -->|Upload| S3
     TF -->|Trigger| SSM
     SSM -->|Deploy| EC2
@@ -50,8 +50,8 @@ graph LR
     style TF fill:#f96
     style S3 fill:#f9f
     style EC2 fill:#9f9
+    style SG fill:#f96
     style SSM fill:#f96
-    style SSM_DOC fill:#f96
     style NGINX fill:#99f
     style FLASK fill:#99f
 ```
@@ -79,7 +79,7 @@ graph LR
 # 1. Configure Terraform variables
 cd terraform
 cp terraform.tfvars.example terraform.tfvars
-# Edit terraform.tfvars with your AWS key pair name
+# Edit terraform.tfvars with your own environment variables
 
 # 2. Initialize and deploy
 terraform init
@@ -147,7 +147,7 @@ chucknoris-jokes/
 1. Developer modifies `app/` or `docker/` files
 2. Runs `terraform apply`
 3. Terraform detects file changes (SHA256 hash)
-4. Files are zipped (via archive_file) and uploaded to S3 (via aws_s3_object)
+4. Files are zipped (via null_resource) and uploaded to S3
 5. Terraform creates EC2 instance, SSM Document, and SSM Association
 6. SSM Association triggers SSM Document on EC2 instance
 7. SSM Document executes: downloads files, installs Docker, runs Docker Compose

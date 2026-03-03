@@ -32,12 +32,18 @@ When working on this project, the AI assistant must follow these rules:
 - **Reason**: Terraform runs from terraform/ directory, but `path.module` resolves correctly
 - **Example**: `filesha256("${path.module}/../app/server.py")` not `filesha256("app/server.py")`
 
-### 6. SSM Document Parameters
+### 6. Terraform-Native vs Shell Commands
+- **Rule**: `archive_file` provider cannot archive directories directly with `content` attribute
+- **Reason**: `archive_file` `source.content` only accepts file paths, not directories
+- **Workaround**: Use `null_resource` with `tar` command to create archive
+- **Example**: `null_resource` + `tar` + `aws s3 cp` for reliable directory archiving
+
+### 7. SSM Document Parameters
 - **Rule**: Parameter names must be alphanumeric (no underscores) for schema version 2.2
 - **Reason**: AWS SSM API validation rejects `S3_BUCKET`, use `S3Bucket`
 - **Convention**: Use PascalCase for parameter names
 
-### 7. SSM Association Configuration
+### 8. SSM Association Configuration
 - **Rule**: Use `targets` parameter, not deprecated `instance_id`
 - **Reason**: AWS provider v5.0+ uses `targets` with `key = "InstanceIds"`
 - **Example**: 
@@ -48,7 +54,7 @@ When working on this project, the AI assistant must follow these rules:
   }
   ```
 
-### 8. AWS Resource Naming
+### 9. AWS Resource Naming
 - **Rule**: Follow consistent naming pattern with environment suffix
 - **Pattern**: `<project-name>-<resource>-<environment>`
 - **Examples**:
@@ -135,14 +141,15 @@ Build and deploy a Chuck Norris jokes web application using:
 1. Developer modifies app/ or docker/ files
 2. Runs: terraform apply
 3. Terraform detects file changes (SHA256 hash)
-4. Files are zipped and uploaded to S3 (via null_resource)
-5. EC2 instance is created/recreated
-6. SSM Document is created with setup commands
-7. SSM Association runs document on instance
-8. Setup script downloads files from S3
-9. Docker Compose builds and starts containers
-10. Application accessible via Elastic IP
+4. Files are zipped (archive_file) and uploaded to S3 (aws_s3_object)
+5. Terraform creates EC2 instance, SSM Document, and SSM Association
+6. SSM Association triggers SSM Document on instance
+7. SSM Document executes: downloads files, installs Docker, runs Docker Compose
+8. Docker Compose builds and starts containers
+9. Application accessible via Elastic IP
 ```
+
+**Note**: SSM Document + Association is the deployment mechanism. Terraform creates the infrastructure, but SSM executes the application deployment on the EC2 instance.
 
 ## Technologies Used
 
@@ -209,7 +216,8 @@ Build and deploy a Chuck Norris jokes web application using:
 - SHA256 hash of all app/docker files
 - Triggers re-deployment when files change
 - Efficient: only deploys when files change
-- Hash includes setup script changes
+- Hash changes trigger file upload and SSM association recreation
+- `null_resource` with `tar` command reliably creates tarball with all directory contents
 
 ### Security by Default
 - Secrets excluded from git (`.gitignore`)
@@ -286,6 +294,7 @@ resource "null_resource" "app_setup_trigger" {
 ### File Upload to S3
 
 ```hcl
+# Create tarball and upload using null_resource
 resource "null_resource" "upload_app_files" {
   depends_on = [aws_s3_bucket.app_files]
 

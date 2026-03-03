@@ -22,7 +22,7 @@ provider "aws" {
 }
 
 data "http" "my_public_ip" {
-  url = "https://ifconfig.me/ip"
+  url = "http://ifconfig.me/ip"
 }
 
 data "aws_vpc" "default" {
