@@ -39,11 +39,6 @@ variable "s3_object_name" {
   default     = "app-files.tar.gz"
 }
 
-variable "ssh_private_key_path" {
-  description = "Path to the SSH private key for connecting to the EC2 instance"
-  type        = string
-}
-
 variable "vpc_id" {
   description = "VPC ID where resources will be deployed. Leave null to use default VPC"
   type        = string

@@ -1,5 +1,96 @@
 # Chuck Norris Jokes - DevOps Assessment
 
+## AI Development Guidelines
+
+When working on this project, the AI assistant must follow these rules:
+
+### 1. Do NOT Delete .terraform Directory
+- **Rule**: Never delete the `.terraform/` folder
+- **Reason**: Contains downloaded provider binaries (100+ MB), re-downloading wastes time and bandwidth
+- **Correct Action**: Only delete state files (`terraform.tfstate`, `terraform.tfstate.backup`, `.terraform.lock.hcl`)
+- **Command**: `rm -f terraform.tfstate terraform.tfstate.backup .terraform.lock.hcl`
+
+### 2. Do NOT Delete Terraform State Files
+- **Rule**: Never delete `terraform.tfstate` or `terraform.lock.hcl` files
+- **Reason**: State files track infrastructure state; deleting them causes Terraform to lose all resource information
+- **Impact**: Without state, Terraform can't manage or destroy existing resources properly
+- **Correct Action**: Use `terraform state list` to check state, `terraform refresh` to update state
+- **Command**: `terraform state rm <resource.address>` to remove specific resources from state
+
+### 3. Use Best Practices
+- **Security**: Never commit secrets or API keys; use `.gitignore` for sensitive files
+- **Code Style**: Follow existing conventions; don't add unnecessary comments
+- **Terraform**: Use resource dependencies, not `time_sleep` or `null_resource` with `triggers` for sequencing
+- **Docker**: Use official base images (Alpine), multi-stage builds for smaller images
+- **AWS**: Follow least privilege principle for IAM roles and policies
+
+### 4. Clean Up Existing Resources Before Re-apply
+- **Rule**: When resources exist in AWS with same names, delete them first
+- **Reason**: Prevents "EntityAlreadyExists" or "InvalidGroup.Duplicate" errors
+- **Approach**: Use `aws <service> delete-*` commands or `terraform destroy` before fresh apply
+
+### 5. Mermaid Diagrams Over ASCII Art
+- **Rule**: Use Mermaid.js for diagrams in markdown files
+- **Reason**: Renders beautifully on GitHub and markdown platforms
+- **Avoid**: Complex ASCII art with special characters that break on different terminals
+
+### 6. File Paths in Terraform
+- **Rule**: Always use `${path.module}` prefix for relative paths
+- **Reason**: Terraform runs from terraform/ directory, but `path.module` resolves correctly
+- **Example**: `filesha256("${path.module}/../app/server.py")` not `filesha256("app/server.py")`
+
+### 7. Terraform-Native vs Shell Commands
+- **Rule**: `archive_file` provider cannot archive directories directly with `content` attribute
+- **Reason**: `archive_file` `source.content` only accepts file paths, not directories
+- **Workaround**: Use `null_resource` with `tar` command to create archive
+- **Example**: `null_resource` + `tar` + `aws s3 cp` for reliable directory archiving
+
+### 8. SSM Document Parameters
+- **Rule**: Parameter names must be alphanumeric (no underscores) for schema version 2.2
+- **Reason**: AWS SSM API validation rejects `S3_BUCKET`, use `S3Bucket`
+- **Convention**: Use PascalCase for parameter names
+
+### 9. SSM Association Configuration
+- **Rule**: Use `targets` parameter, not deprecated `instance_id`
+- **Reason**: AWS provider v5.0+ uses `targets` with `key = "InstanceIds"`
+- **Example**:
+  ```hcl
+  targets {
+    key    = "InstanceIds"
+    values = [aws_instance.web.id]
+  }
+  ```
+
+### 10. AWS Resource Naming
+- **Rule**: Follow consistent naming pattern with environment suffix
+- **Pattern**: `<project-name>-<resource>-<environment>`
+- **Examples**:
+  - `chucknoris-jokes-sg-dev`
+  - `chucknoris-jokes-ec2-role-dev`
+  - `chucknoris-setup-dev`
+
+### 11. Git Workflow
+- **Rule**: Never commit `terraform.tfvars`, `.env`, or state files
+- **Reason**: These contain sensitive values (API keys, access tokens)
+- **Action**: These files must be in `.gitignore`
+
+### 12. S3 Bucket Naming
+- **Rule**: Bucket names must match regex `^[a-zA-Z0-9.\-_]{1,255}$`
+- **Avoid**: Special characters, uppercase letters (AWS S3 is lowercase-only)
+- **Pattern**: `chucknoris-jokes-dev-appfiles-<random-id>`
+
+### 13. Route Table Validation
+- **Rule**: Include route table data sources to validate public subnet
+- **Reason**: Ensures subnet has IGW route (0.0.0.0/0 → IGW) for internet access
+- **Data Sources**: `aws_route_tables` and `aws_route_table` with IGW filters
+
+### 14. IAM Policy Resource Naming
+- **Rule**: When policies are deleted manually, terraform import may be needed
+- **Alternative**: Use `terraform destroy` to clean up all resources including IAM policies
+- **Caution**: IAM policies with same name in different regions can cause conflicts
+
+---
+
 ## Project Overview
 
 This project is a **DevOps Assessment** that demonstrates a fully automated deployment pipeline using Infrastructure as Code (IaC) and configuration management best practices.
@@ -35,18 +126,21 @@ Build and deploy a Chuck Norris jokes web application using:
    - Docker Compose for orchestration
 
 3. **Infrastructure** (`terraform/`)
-   - **AWS Resources**:
-     - S3 Bucket (encrypted, versioned)
-     - IAM Role & Policies (minimal permissions)
-     - EC2 Instance (t2.micro)
-     - Elastic IP (static public IP)
-     - Security Group (auto-detects deployer IP)
-     - Default VPC & Subnet
+    - **AWS Resources**:
+      - S3 Bucket (encrypted, versioned)
+      - IAM Role & Policies (minimal permissions)
+      - EC2 Instance (t3.nano)
+      - Elastic IP (static public IP)
+      - Security Group (auto-detects deployer IP)
+      - SSM Document (setup commands)
+      - SSM Association (automates document execution)
+      - Default VPC & Subnet with IGW route
 
-4. **Deployment** (`scripts/`)
-   - `setup.sh`: Server setup and application deployment script
-   - Uploads via Terraform `provisioner "file"`
-   - Executed via Terraform `provisioner "remote-exec"`
+4. **Deployment** (`terraform/`)
+    - SSM Document: Contains all setup steps
+    - SSM Association: Triggers document on EC2 instance
+    - No user data scripts
+    - Secure access via AWS SSM (no SSH keys needed)
 
 ### Deployment Workflow
 
@@ -54,14 +148,15 @@ Build and deploy a Chuck Norris jokes web application using:
 1. Developer modifies app/ or docker/ files
 2. Runs: terraform apply
 3. Terraform detects file changes (SHA256 hash)
-4. Files are zipped and uploaded to S3
-5. EC2 instance is created/recreated
-6. Terraform uploads scripts/setup.sh via provisioner "file"
-7. Terraform executes setup.sh via provisioner "remote-exec"
-8. Setup script downloads files from S3
-9. Docker Compose builds and starts containers
-10. Application accessible via Elastic IP
+4. Files are zipped (archive_file) and uploaded to S3 (aws_s3_object)
+5. Terraform creates EC2 instance, SSM Document, and SSM Association
+6. SSM Association triggers SSM Document on instance
+7. SSM Document executes: downloads files, installs Docker, runs Docker Compose
+8. Docker Compose builds and starts containers
+9. Application accessible via Elastic IP
 ```
+
+**Note**: SSM Document + Association is the deployment mechanism. Terraform creates the infrastructure, but SSM executes the application deployment on the EC2 instance.
 
 ## Technologies Used
 
@@ -117,16 +212,19 @@ Build and deploy a Chuck Norris jokes web application using:
 - **2-container separation**: App and proxy are isolated
 
 ### Automated Deployment
-- Remote-exec provisioner for EC2 initialization
+- SSM Document for EC2 initialization
+- SSM Association for automated script execution
 - No manual SSH needed after initial setup
 - Health checks ensure application is running
 - File change detection triggers automatic deployment
+- AWS SSM for secure instance access
 
 ### File Change Detection
 - SHA256 hash of all app/docker files
 - Triggers re-deployment when files change
 - Efficient: only deploys when files change
-- Hash includes setup script changes
+- Hash changes trigger file upload and SSM association recreation
+- `null_resource` with `tar` command reliably creates tarball with all directory contents
 
 ### Security by Default
 - Secrets excluded from git (`.gitignore`)
@@ -134,11 +232,12 @@ Build and deploy a Chuck Norris jokes web application using:
 - Auto-detection of deployer IP for SSH
 - Encrypted S3 bucket with versioning
 
-### Provisioners
-- `provisioner "file"`: Uploads setup script to EC2
-- `provisioner "remote-exec"`: Executes setup script remotely
-- `triggers`: Force re-run on script or file changes
-- Re-runs on instance recreation
+### SSM Document Execution
+- SSM Document: Contains setup commands (Docker, Compose, app deployment)
+- SSM Association: Automatically runs document on EC2 instance
+- Parameters: S3 bucket, object name, region
+- Re-runs when association is recreated
+- File upload happens before association (depends_on)
 
 ## Project Structure
 
@@ -157,13 +256,14 @@ chucknoris-jokes/
 │   ├── main.tf             # AWS resources
 │   ├── variables.tf        # Configuration
 │   ├── outputs.tf          # Outputs
-│   ├── terraform.tfvars    # Dev environment variables
-│   └── environments/
-│       └── dev.tfvars    # Alternative env config (not used)
-├── scripts/                  # Automation
-│   └── setup.sh          # Server deployment script
+│   ├── ssm-document.yaml  # SSM Command document
+│   ├── terraform.tfvars    # Dev environment variables (git-ignored)
+│   └── terraform.tfvars.example # Example variables (committed)
+├── scripts/                  # Automation (backup/reference)
+│   └── setup.sh          # Legacy deployment script
 ├── .gitignore              # Exclude secrets
-└── AI.md                   # This file
+├── README.md              # Project documentation
+└── AI.md                 # This file
 ```
 
 ## Key Implementation Details
@@ -174,55 +274,77 @@ chucknoris-jokes/
 # Terraform calculates hash of all source files
 locals {
   app_files_hash = sha256(join("", [
-    filesha256("../app/server.py"),
-    filesha256("../app/requirements.txt"),
-    filesha256("../app/templates/index.html"),
-    filesha256("../app/static/style.css"),
-    filesha256("../docker/Dockerfile"),
-    filesha256("../docker/docker-compose.yml"),
-    filesha256("../docker/nginx.conf"),
+    filesha256("${path.module}/../app/server.py"),
+    filesha256("${path.module}/../app/requirements.txt"),
+    filesha256("${path.module}/../app/templates/index.html"),
+    filesha256("${path.module}/../app/static/style.css"),
+    filesha256("${path.module}/../docker/Dockerfile"),
+    filesha256("${path.module}/../docker/docker-compose.yml"),
+    filesha256("${path.module}/../docker/nginx.conf"),
   ]))
 }
 
 # Triggers re-deployment when hash changes
-resource "null_resource" "app_setup" {
+resource "null_resource" "app_setup_trigger" {
+  depends_on = [aws_ssm_association.app_setup]
+
   triggers = {
-    script_sha256  = sha256(file("../scripts/setup.sh"))
     app_files_hash = local.app_files_hash
-    instance_id    = aws_instance.web.id
+  }
+
+  provisioner "local-exec" {
+    command = "echo 'SSM Document applied with hash: ${local.app_files_hash}'"
   }
 }
 ```
 
-### Remote-Exec Provisioner Flow
+### File Upload to S3
 
 ```hcl
-resource "null_resource" "app_setup" {
-  depends_on = [aws_instance.web]
+# Create tarball and upload using null_resource
+resource "null_resource" "upload_app_files" {
+  depends_on = [aws_s3_bucket.app_files]
 
-  # Upload setup script to EC2
-  provisioner "file" {
-    source      = "${path.module}/../scripts/setup.sh"
-    destination = "/tmp/setup.sh"
-  }
-
-  # Execute setup script remotely
-  provisioner "remote-exec" {
-    inline = [
-      "sudo bash -c 'chmod +x /tmp/setup.sh && S3_BUCKET=\"${aws_s3_bucket.app_files.bucket}\" S3_OBJECT=\"${var.s3_object_name}\" REGION=\"${var.region}\" /tmp/setup.sh && rm /tmp/setup.sh'",
-    ]
-  }
-
-  # Re-run when files or instance changes
-  triggers = {
-    script_sha256  = sha256(file("${path.module}/../scripts/setup.sh"))
-    app_files_hash = local.app_files_hash
-    instance_id    = aws_instance.web.id
+  provisioner "local-exec" {
+    command = "tar -czf /tmp/app-files.tar.gz ${path.module}/../app ${path.module}/../docker && aws s3 cp /tmp/app-files.tar.gz s3://${aws_s3_bucket.app_files.bucket}/${var.s3_object_name} --region ${var.region} && rm -f /tmp/app-files.tar.gz"
   }
 }
 ```
 
-### Setup Script Flow
+### SSM Document Execution
+
+```hcl
+resource "aws_ssm_document" "app_setup" {
+  name            = "chucknoris-setup-${var.environment}"
+  document_type   = "Command"
+  document_format = "YAML"
+
+  content = templatefile("${path.module}/ssm-document.yaml", {
+    S3Bucket = aws_s3_bucket.app_files.bucket
+    S3Object = var.s3_object_name
+    Region   = var.region
+  })
+}
+
+resource "aws_ssm_association" "app_setup" {
+  name = aws_ssm_document.app_setup.name
+
+  depends_on = [null_resource.upload_app_files]
+
+  targets {
+    key    = "InstanceIds"
+    values = [aws_instance.web.id]
+  }
+
+  parameters = {
+    S3Bucket = aws_s3_bucket.app_files.bucket
+    S3Object = var.s3_object_name
+    Region   = var.region
+  }
+}
+```
+
+### SSM Document Script Flow
 
 ```bash
 1. Install dependencies (yum-utils, curl, git)
@@ -233,8 +355,9 @@ resource "null_resource" "app_setup" {
 6. Run docker-compose build
 7. Stop old containers (docker-compose down)
 8. Start new containers (docker-compose up -d)
-9. Health check (wait for /health endpoint)
-10. Display application URL
+9. Health check (wait for Flask app container)
+10. Health check (wait for nginx /health endpoint)
+11. Display application URL
 ```
 
 ## Cost Estimation
@@ -334,21 +457,36 @@ ssh_private_key_path = "/path/to/your/private-key.pem"
 
 ## Troubleshooting
 
+### Access EC2 via AWS SSM
+
+```bash
+# Install Session Manager plugin if not already installed
+# https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
+
+# Connect to instance
+aws ssm start-session --target <INSTANCE-ID> --region ap-southeast-3
+```
+
+Or use the output from Terraform:
+```bash
+terraform output ssm_command
+```
+
 ### Issue: File change not detected
 **Solution**: Manually trigger re-deployment:
 ```bash
 cd terraform
-terraform taint null_resource.app_setup
+terraform taint null_resource.upload_app_files
 terraform apply
 ```
 
 ### Issue: Application not accessible
-**Solution**: Check instance status and logs:
+**Solution**: Check instance status and logs via SSM:
 ```bash
-# SSH into EC2
-ssh -i /path/to/key.pem ec2-user@<ELASTIC-IP>
+# Connect via SSM
+aws ssm start-session --target <INSTANCE-ID> --region ap-southeast-3
 
-# Check containers
+# In SSM session, check containers
 docker ps
 
 # Check logs
@@ -358,6 +496,18 @@ docker logs chucknoris-jokes-nginx
 # Check docker-compose logs
 cd /opt/chucknoris-jokes/docker
 docker-compose logs
+```
+
+### Issue: SSM Document not executing
+**Solution**: Check SSM command status:
+```bash
+# List SSM commands
+aws ssm list-commands --filters key=DocumentName,value=chucknoris-setup-dev
+
+# Get command invocation details
+aws ssm get-command-invocation --command-id <COMMAND-ID> --instance-id <INSTANCE-ID>
+
+# Check CloudWatch logs if available
 ```
 
 ### Issue: Elastic IP not attaching
@@ -370,34 +520,20 @@ terraform output elastic_ip
 aws ec2 describe-addresses --allocation-ids <ALLOCATION-ID>
 ```
 
-### Issue: Docker Compose not found
-**Solution**: Manual installation via SSH:
-```bash
-ssh -i /path/to/key.pem ec2-user@<ELASTIC-IP>
-
-# Check docker-compose
-which docker-compose
-
-# Manually install if needed
-sudo curl -SL "https://github.com/docker/compose/releases/download/v2.23.0/docker-compose-linux-x86_64" \
-    -o /usr/local/bin/docker-compose
-sudo chmod +x /usr/local/bin/docker-compose
-```
-
 ## Learning Outcomes
 
 This project demonstrates:
 
 ✅ **Infrastructure as Code**: Terraform manages all AWS resources
 ✅ **Containerization**: Multi-stage Docker builds with 2-container setup
-✅ **Automation**: Remote-exec provisioner eliminates manual configuration
-✅ **Security**: Auto SSH restriction, encryption, IAM least privilege
+✅ **Automation**: SSM Document + Association eliminates manual configuration
+✅ **Security**: AWS SSM access, no SSH keys needed, encryption, IAM least privilege
 ✅ **Change Detection**: Automatic file change detection with hash triggers
 ✅ **Scalability**: Elastic IP ensures consistent access
 ✅ **Best Practices**: Separation of concerns, official images, no hardcoded secrets
 ✅ **Cost Optimization**: Free tier resources, efficient container design
-✅ **Documentation**: Complete AI.md, inline comments
-✅ **Flexible Deployment**: Triggers allow re-deployment without recreation
+✅ **Documentation**: Complete README.md and AI.md, inline comments
+✅ **Flexible Deployment**: Hash-based triggers allow re-deployment without recreation
 
 ## Future Enhancements
 
