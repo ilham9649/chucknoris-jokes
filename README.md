@@ -1,3 +1,5 @@
+<<<<<<< HEAD
+=======
 # Chuck Norris Jokes - DevOps Assessment
 
 A fully automated deployment pipeline demonstrating Infrastructure as Code (IaC) and configuration management best practices using Python Flask, Docker, Terraform, and AWS.
@@ -263,3 +265,4 @@ For detailed documentation, see [AI.md](AI.md) which includes:
 ---
 
 **License**: This project is for assessment purposes.
+>>>>>>> 1f12307 (fix: change from ssh to ssm)

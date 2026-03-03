@@ -279,12 +279,14 @@ resource "null_resource" "upload_app_files" {
   depends_on = [aws_s3_bucket.app_files]
 
   provisioner "local-exec" {
-    command = "tar -czf /tmp/app-files.tar.gz ${path.module}/app ${path.module}/docker && aws s3 cp /tmp/app-files.tar.gz s3://${aws_s3_bucket.app_files.bucket}/${var.s3_object_name} --region ${var.region} && rm -f /tmp/app-files.tar.gz"
+    command = "tar -czf /tmp/app-files.tar.gz ${path.module}/../app ${path.module}/../docker && aws s3 cp /tmp/app-files.tar.gz s3://${aws_s3_bucket.app_files.bucket}/${var.s3_object_name} --region ${var.region} && rm -f /tmp/app-files.tar.gz"
   }
 }
 
 resource "aws_ssm_association" "app_setup" {
   name = aws_ssm_document.app_setup.name
+
+  depends_on = [null_resource.upload_app_files]
 
   targets {
     key    = "InstanceIds"
