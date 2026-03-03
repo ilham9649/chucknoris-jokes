@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.0"
+  required_version = ">= 1.14"
 
   required_providers {
     aws = {
@@ -138,8 +138,24 @@ resource "random_id" "bucket_suffix" {
   byte_length = 4
 }
 
-resource "aws_s3_bucket" "app_files" {
+module "s3_bucket" {
+  source  = "terraform-aws-modules/s3-bucket/aws"
+  version = "~> 4.0"
+
   bucket = local.s3_bucket_name
+
+  versioning = {
+    enabled = true
+  }
+
+  server_side_encryption_configuration = {
+    rule = {
+      apply_server_side_encryption_by_default = {
+        sse_algorithm = "AES256"
+      }
+    }
+  }
+
   tags = {
     Name        = "${var.project_name}-files"
     Environment = var.environment
@@ -148,41 +164,28 @@ resource "aws_s3_bucket" "app_files" {
   }
 }
 
-resource "aws_s3_bucket_versioning" "app_files" {
-  bucket = aws_s3_bucket.app_files.id
-  versioning_configuration {
-    status = "Enabled"
-  }
-}
+module "iam_assumable_role" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-assumable-role"
+  version = "~> 5.0"
 
-resource "aws_s3_bucket_server_side_encryption_configuration" "app_files" {
-  bucket = aws_s3_bucket.app_files.id
+  create_role             = true
+  create_instance_profile = true
 
-  rule {
-    apply_server_side_encryption_by_default {
-      sse_algorithm = "AES256"
-    }
-  }
-}
+  role_name         = "${var.project_name}-ec2-role-${var.environment}"
+  role_requires_mfa = false
 
-resource "aws_iam_role" "ec2_role" {
-  name = "${var.project_name}-ec2-role-${var.environment}"
+  trusted_role_services = [
+    "ec2.amazonaws.com"
+  ]
 
-  assume_role_policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [
-      {
-        Action = "sts:AssumeRole"
-        Effect = "Allow"
-        Principal = {
-          Service = "ec2.amazonaws.com"
-        }
-      }
-    ]
-  })
+  number_of_custom_role_policy_arns = 1
+
+  custom_role_policy_arns = [
+    aws_iam_policy.s3_access.arn
+  ]
 
   tags = {
-    Name        = "${var.project_name}-ec2-role"
+    Name        = "${var.project_name}-iam"
     Environment = var.environment
     Project     = var.project_name
     ManagedBy   = "Terraform"
@@ -203,27 +206,17 @@ resource "aws_iam_policy" "s3_access" {
           "s3:ListBucket"
         ]
         Resource = [
-          aws_s3_bucket.app_files.arn,
-          "${aws_s3_bucket.app_files.arn}/*"
+          module.s3_bucket.s3_bucket_arn,
+          "${module.s3_bucket.s3_bucket_arn}/*"
         ]
       }
     ]
   })
 }
 
-resource "aws_iam_role_policy_attachment" "s3_access" {
-  role       = aws_iam_role.ec2_role.name
-  policy_arn = aws_iam_policy.s3_access.arn
-}
-
 resource "aws_iam_role_policy_attachment" "ssm_managed" {
-  role       = aws_iam_role.ec2_role.name
+  role       = module.iam_assumable_role.iam_role_name
   policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-}
-
-resource "aws_iam_instance_profile" "ec2_profile" {
-  name = "${var.project_name}-profile-${var.environment}"
-  role = aws_iam_role.ec2_role.name
 }
 
 resource "aws_security_group" "web_sg" {
@@ -285,7 +278,7 @@ resource "aws_instance" "web" {
   ami                    = data.aws_ami.amazon_linux_2.id
   instance_type          = var.instance_type
   key_name               = var.key_name
-  iam_instance_profile   = aws_iam_instance_profile.ec2_profile.name
+  iam_instance_profile   = module.iam_assumable_role.iam_instance_profile_name
   subnet_id              = local.subnet_id
   vpc_security_group_ids = [aws_security_group.web_sg.id]
 
@@ -297,23 +290,28 @@ resource "aws_instance" "web" {
   }
 }
 
+resource "aws_eip_association" "web_eip_association" {
+  instance_id   = aws_instance.web.id
+  allocation_id = aws_eip.web_eip.id
+}
+
 resource "aws_ssm_document" "app_setup" {
   name            = "chucknoris-setup-${var.environment}"
   document_type   = "Command"
   document_format = "YAML"
 
   content = templatefile("${path.module}/ssm-document.yaml", {
-    S3Bucket = aws_s3_bucket.app_files.bucket
+    S3Bucket = module.s3_bucket.s3_bucket_id
     S3Object = var.s3_object_name
     Region   = var.region
   })
 }
 
 resource "null_resource" "upload_app_files" {
-  depends_on = [aws_s3_bucket.app_files]
+  depends_on = [module.s3_bucket]
 
   provisioner "local-exec" {
-    command = "tar -czf /tmp/app-files.tar.gz ${path.module}/../app ${path.module}/../docker && aws s3 cp /tmp/app-files.tar.gz s3://${aws_s3_bucket.app_files.bucket}/${var.s3_object_name} --region ${var.region} && rm -f /tmp/app-files.tar.gz"
+    command = "tar -czf /tmp/app-files.tar.gz ${path.module}/../app ${path.module}/../docker && aws s3 cp /tmp/app-files.tar.gz s3://${module.s3_bucket.s3_bucket_id}/${var.s3_object_name} --region ${var.region} && rm -f /tmp/app-files.tar.gz"
   }
 }
 
@@ -328,7 +326,7 @@ resource "aws_ssm_association" "app_setup" {
   }
 
   parameters = {
-    S3Bucket = aws_s3_bucket.app_files.bucket
+    S3Bucket = module.s3_bucket.s3_bucket_id
     S3Object = var.s3_object_name
     Region   = var.region
   }
@@ -344,9 +342,4 @@ resource "null_resource" "app_setup_trigger" {
   provisioner "local-exec" {
     command = "echo 'SSM Document applied with hash: ${local.app_files_hash}'"
   }
-}
-
-resource "aws_eip_association" "web_eip_association" {
-  instance_id   = aws_instance.web.id
-  allocation_id = aws_eip.web_eip.id
 }

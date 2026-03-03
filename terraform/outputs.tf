@@ -4,7 +4,7 @@ output "elastic_ip" {
 }
 
 output "instance_public_ip" {
-  description = "Public IP address of the EC2 instance (same as Elastic IP)"
+  description = "Public IP address of the EC2 instance"
   value       = aws_eip.web_eip.public_ip
 }
 
@@ -50,5 +50,5 @@ output "app_files_hash" {
 
 output "s3_bucket_name" {
   description = "Name of the S3 bucket storing app files"
-  value       = aws_s3_bucket.app_files.bucket
+  value       = module.s3_bucket.s3_bucket_id
 }
