@@ -42,7 +42,6 @@ variable "s3_object_name" {
 variable "ssh_private_key_path" {
   description = "Path to the SSH private key for connecting to the EC2 instance"
   type        = string
-  default     = "/home/ilham/.ssh/id_rsa"
 }
 
 variable "vpc_id" {
