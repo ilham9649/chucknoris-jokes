@@ -7,13 +7,12 @@ variable "region" {
 variable "instance_type" {
   description = "EC2 instance type"
   type        = string
-  default     = "t2.micro"
+  default     = "t3.nano"
 }
 
 variable "key_name" {
-  description = "Name of existing SSH key pair in AWS (optional when using AWS SSM)"
+  description = "Name of existing SSH key pair in AWS"
   type        = string
-  default     = null
 }
 
 variable "environment" {
