@@ -52,6 +52,40 @@ data "aws_subnets" "default" {
   }
 }
 
+data "aws_route_tables" "public" {
+  vpc_id = local.vpc_id
+
+  filter {
+    name   = "route.destination-cidr-block"
+    values = ["0.0.0.0/0"]
+  }
+
+  filter {
+    name   = "route.gateway-id"
+    values = ["igw-*"]
+  }
+}
+
+data "aws_route_table" "public_main" {
+  count  = length(data.aws_route_tables.public.ids)
+  vpc_id = local.vpc_id
+
+  filter {
+    name   = "association.main"
+    values = ["true"]
+  }
+
+  filter {
+    name   = "route.destination-cidr-block"
+    values = ["0.0.0.0/0"]
+  }
+
+  filter {
+    name   = "route.gateway-id"
+    values = ["igw-*"]
+  }
+}
+
 locals {
   vpc_id            = var.vpc_id != null ? var.vpc_id : data.aws_vpc.default.id
   ssh_allowed_cidrs = var.allowed_ssh_cidr != null ? var.allowed_ssh_cidr : ["${chomp(data.http.my_public_ip.response_body)}/32"]

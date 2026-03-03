@@ -1,5 +1,3 @@
-<<<<<<< HEAD
-=======
 # Chuck Norris Jokes - DevOps Assessment
 
 A fully automated deployment pipeline demonstrating Infrastructure as Code (IaC) and configuration management best practices using Python Flask, Docker, Terraform, and AWS.
@@ -17,55 +15,52 @@ This project displays random Chuck Norris jokes fetched from [Chuck Norris API](
 
 ## Architecture
 
+```mermaid
+graph LR
+    subgraph Local["Developer Machine"]
+        TF[Terraform]
+        APP[App Files]
+    end
+
+    subgraph AWS["AWS Cloud"]
+        S3[S3 Bucket]
+        SG[Security Group]
+        EIP[Elastic IP]
+        EC2[EC2 Instance]
+        
+        subgraph EC2_INSIDE["Inside EC2"]
+            SSM[SSM Document]
+            DOCKER[Docker Compose]
+            NGINX[Nginx<br/>:80]
+            FLASK[Flask App<br/>:5000]
+        end
+    end
+
+    USER[User] -->|HTTP| EIP
+    EIP --> EC2
+    SG --> EC2
+    TF -->|Upload| S3
+    TF -->|Deploy| EC2
+    S3 -->|Download| EC2
+    SSM --> DOCKER
+    DOCKER --> NGINX
+    DOCKER --> FLASK
+    NGINX <--> FLASK
+    FLASK -->|API| API[Chuck Norris API]
+
+    style TF fill:#f96
+    style S3 fill:#f9f
+    style EC2 fill:#9f9
+    style NGINX fill:#99f
+    style FLASK fill:#99f
 ```
-┌──────────────────────────────────────────────────────────────────┐
-│                         YOUR LAPTOP                               │
-│  ┌─────────────┐  ┌─────────────┐                          │
-│  │  Terraform  │  │    Docker   │                          │
-│  │  (Plan)     │  │   (Test)    │                          │
-│  └──────┬──────┘  └─────────────┘                          │
-│         │                                                      │
-│         │ AWS API + Upload to S3                              │
-│         │                                                      │
-│         ▼                                                      │
-└─────────┼───────────────────────────────────────────────────────────┘
-          │
-┌─────────┼───────────────────────────────────────────────────────────┐
-│         ▼            AWS Cloud (ap-southeast-3)                  │
-│  ┌──────────────────────────────────────────────────────────────┐   │
-│  │         Security Group (SSH/SSM optional)               │   │
-│  └────────────────┬───────────────────────────────────────────┘   │
-│                   │                                              │
-│  ┌────────────────▼──────────────────────────────────────┐       │
-│  │         EC2 (t2.micro) - Amazon Linux 2            │       │
-│  │  ┌──────────────────────────────────────────────────┐│       │
-│  │  │  SSM Document (runs via SSM Association)   ││       │
-│  │  │  1. Install Docker                           ││       │
-│  │  │  2. Download from S3                        ││       │
-│  │  │  3. Run docker-compose                       ││       │
-│  │  └──────────────────────────────────────────────────┘│       │
-│  │  ┌──────────────────────────────────────────────────┐│       │
-│  │  │  Docker Compose                             ││       │
-│  │  │  ┌───────────┐       ┌──────────────┐   ││       │
-│  │  │  │   Nginx   │◀──────│  Flask App   │   ││       │
-│  │  │  │ (port 80) │       │  (port 5000) │   ││       │
-│  │  │  │Official   │       │              │   ││       │
-│  │  │  └───────────┘       └──────┬───────┘   ││       │
-│  │  └─────────────────────────────┼───────────┘│       │
-│  │                                │ HTTP      │          │
-│  │                                ▼          │          │
-│  │                    api.chucknorris.io          │          │
-│  └───────────────────────────────────────────────┘          │
-│                                                    │         │
-│  ┌────────────────────────────────────────────────┐          │
-│  │         S3 Bucket (App Files)                │          │
-│  │         app-files.tar.gz                     │          │
-│  └────────────────────────────────────────────────┘          │
-│                                                            │
-│  Setup Execution: SSM Document + Association (no user data)  │
-│  Instance Access: AWS SSM (secure, no SSH key needed)       │
-└──────────────────────────────────────────────────────────────────┘
-```
+
+### Architecture Flow
+
+1. **Deployment**: Developer runs `terraform apply` → uploads files to S3 → creates EC2 instance
+2. **Configuration**: SSM Association triggers SSM Document on EC2 → downloads files → runs Docker Compose
+3. **Access**: User accesses app via Elastic IP → Nginx proxy → Flask app → Chuck Norris API
+4. **Management**: AWS SSM for secure instance access (no SSH keys needed)
 
 ## Quick Start
 
@@ -155,7 +150,7 @@ chucknoris-jokes/
 4. Files are zipped and uploaded to S3
 5. EC2 instance is created/recreated
 6. SSM Document is created with setup commands
-7. SSM Association runs the document on the instance
+7. SSM Association runs document on instance
 8. Setup script downloads files from S3
 9. Docker Compose builds and starts containers
 10. Application accessible via Elastic IP
@@ -173,12 +168,12 @@ chucknoris-jokes/
 
 | Resource | Cost (Monthly) |
 |----------|----------------|
-| EC2 t2.micro | ~$8.76 |
+| EC2 t3.nano | ~$4.80 |
 | Elastic IP | ~$3.60 |
 | EBS 8GB | ~$0.64 |
 | S3 Storage (~1GB) | ~$0.02 |
 | Data Transfer | Free tier: 100GB |
-| **Total** | **~$13 USD** |
+| **Total** | **~$9 USD** |
 
 **Free Tier**: EC2 and EBS are free for 12 months
 
@@ -233,8 +228,8 @@ docker-compose logs
 
 ```bash
 cd terraform
-# Taint the SSM association to force re-run
-terraform taint aws_ssm_association.app_setup
+# Taint the upload resource to force re-upload
+terraform taint null_resource.upload_app_files
 terraform apply
 ```
 
@@ -251,6 +246,7 @@ terraform apply
 | AWS S3 | File storage |
 | AWS EC2 | Compute |
 | AWS IAM | Security |
+| AWS SSM | Remote management |
 
 ## Documentation
 
@@ -265,4 +261,3 @@ For detailed documentation, see [AI.md](AI.md) which includes:
 ---
 
 **License**: This project is for assessment purposes.
->>>>>>> 1f12307 (fix: change from ssh to ssm)
