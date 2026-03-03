@@ -132,6 +132,111 @@ subnet_id         = null
 allowed_ssh_cidr  = null
 ```
 
+## Terraform Backend Setup (Recommended)
+
+The project includes a Terraform backend configuration using S3 and DynamoDB for remote state management. This enables team collaboration and secure state storage.
+
+### Initial Setup (One-time)
+
+```bash
+# 1. Configure bootstrap variables
+cd terraform-bootstrap
+cp terraform.tfvars.example terraform.tfvars
+
+# 2. Create backend resources (S3 + DynamoDB)
+terraform init
+terraform apply -auto-approve
+
+# 3. Get backend configuration
+terraform output bucket_name  # e.g., terraform-state-dev-123456789012
+terraform output table_name   # e.g., terraform-state-locks-dev-123456789012
+
+# 4. Migrate main terraform to use backend
+cd ../terraform
+terraform init \
+    -backend-config="bucket=<bucket_name>" \
+    -backend-config="dynamodb_table=<table_name>" \
+    -backend-config="region=ap-southeast-3" \
+    -migrate-state
+```
+
+### Automated Setup
+
+Use the bootstrap script for automated setup:
+
+```bash
+cd terraform-bootstrap
+./bootstrap.sh
+```
+
+The script will:
+- Create terraform.tfvars from example
+- Initialize and apply bootstrap resources
+- Configure main Terraform with backend settings
+- Migrate existing state automatically
+- Create backend-config.tfvars for reference
+
+### Backend Configuration
+
+Backend configuration uses `-backend-config` flags because Terraform's backend block doesn't support variable interpolation.
+
+**Options for backend configuration:**
+
+1. **Using -backend-config flags** (flexible, recommended for CI/CD):
+   ```bash
+   terraform init \
+       -backend-config="bucket=terraform-state-dev-123456789012" \
+       -backend-config="dynamodb_table=terraform-state-locks-dev-123456789012" \
+       -backend-config="region=ap-southeast-3"
+   ```
+
+2. **Using backend-config file** (reusable, recommended for teams):
+   ```bash
+   cat > backend-config.tfvars << EOF
+   bucket         = "terraform-state-dev-123456789012"
+   dynamodb_table = "terraform-state-locks-dev-123456789012"
+   region         = "ap-southeast-3"
+   EOF
+   
+   terraform init -backend-config=backend-config.tfvars
+   ```
+
+### Backend Resources
+
+- **S3 Bucket**: `terraform-state-<env>-<aws-account-id>`
+  - Encrypted (AES256)
+  - Versioning enabled
+  - Public access blocked
+  - Lifecycle rule for old state versions (90 days)
+  
+- **DynamoDB Table**: `terraform-state-locks-<env>-<aws-account-id>`
+  - Partition key: LockID (string)
+  - Point-in-time recovery enabled
+  - Used for state locking
+
+### Benefits
+
+- ✅ Team collaboration on shared infrastructure
+- ✅ State locking prevents concurrent apply conflicts
+- ✅ Versioned state files for history and rollback
+- ✅ Secure remote storage (encrypted)
+- ✅ Automated state migration from local to remote
+- ✅ Flexible configuration without code changes
+
+### Cleanup
+
+To remove backend resources, destroy main infrastructure first:
+
+```bash
+cd terraform
+terraform destroy
+
+cd ../terraform-bootstrap
+terraform destroy
+```
+
+**Important**: Never delete bootstrap resources without destroying main infrastructure first, or you'll lose state tracking.
+
 ## Features
 
 - **AWS SSM Access**: Secure instance access without SSH keys
@@ -203,13 +308,26 @@ allowed_ssh_cidr  = null
   - Load balancer integration
 - **When needed**: Application becomes complex and experiences variable traffic
 
-### 5. Terraform Backend
-- **Add Terraform Backend**: Use S3 with DynamoDB for remote state
+### 5. Terraform Backend ✅ Implemented
+- **Terraform Backend**: S3 with DynamoDB for remote state
+- **Implementation**: Bootstrap pattern with `terraform-bootstrap/` directory
+- **Setup**:
+  ```bash
+  # Initialize backend resources
+  cd terraform-bootstrap
+  terraform init
+  terraform apply -auto-approve
+  
+  # Migrate main terraform to use backend
+  cd ../terraform
+  terraform init -migrate-state
+  ```
 - **Benefits**:
   - Team collaboration on shared infrastructure
   - State locking to prevent conflicts
   - Versioned state files
   - Better security (state not stored locally)
+  - Automated state migration from local to remote
 
 ### 6. CI/CD Pipeline
 - **Add CI/CD**: Implement GitHub Actions or AWS CodePipeline
@@ -233,8 +351,14 @@ chucknoris-jokes/
 │   ├── Dockerfile              # Flask app container
 │   ├── nginx.conf              # Nginx proxy config
 │   └── docker-compose.yml      # 2 containers
+├── terraform-bootstrap/        # Backend infrastructure
+│   ├── main.tf                 # S3 bucket + DynamoDB table
+│   ├── variables.tf            # Configuration
+│   ├── outputs.tf              # Backend resource outputs
+│   ├── bootstrap.sh            # Automated setup script
+│   └── terraform.tfvars.example # Example variables
 ├── terraform/                   # IaC
-│   ├── main.tf                 # AWS resources
+│   ├── main.tf                 # AWS resources + backend config
 │   ├── variables.tf            # Configuration
 │   ├── outputs.tf              # Outputs
 │   ├── ssm-document.yaml       # SSM Command document

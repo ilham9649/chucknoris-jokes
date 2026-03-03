@@ -89,6 +89,47 @@ When working on this project, the AI assistant must follow these rules:
 - **Alternative**: Use `terraform destroy` to clean up all resources including IAM policies
 - **Caution**: IAM policies with same name in different regions can cause conflicts
 
+### 15. Terraform Remote State Backend
+- **Rule**: Use `terraform-bootstrap/` to create backend resources (S3 + DynamoDB)
+- **Reason**: Bootstrap pattern ensures backend exists before main Terraform uses it
+- **Architecture**:
+  - `terraform-bootstrap/`: Creates S3 bucket and DynamoDB table for state management
+  - `terraform/`: Uses remote backend after initialization with -backend-config
+- **Backend Resources**:
+  - S3 bucket: `terraform-state-<env>-<aws-account-id>`
+  - DynamoDB table: `terraform-state-locks-<env>-<aws-account-id>`
+- **Security**: 
+  - S3 bucket encrypted (AES256)
+  - Versioning enabled (state history)
+  - Public access blocked
+  - DynamoDB for state locking (prevents concurrent apply conflicts)
+- **Setup Workflow**:
+  ```bash
+  # 1. Create backend resources
+  cd terraform-bootstrap
+  terraform init
+  terraform apply -auto-approve
+  
+  # 2. Get backend configuration
+  terraform output bucket_name  # e.g., terraform-state-dev-123456789012
+  terraform output table_name   # e.g., terraform-state-locks-dev-123456789012
+  
+  # 3. Initialize main Terraform with backend config
+  cd ../terraform
+  terraform init \
+      -backend-config="bucket=<bucket_name>" \
+      -backend-config="dynamodb_table=<table_name>" \
+      -backend-config="region=ap-southeast-3" \
+      -migrate-state
+  
+  # 4. Verify migration
+  terraform state list
+  ```
+- **Backend Configuration**: Use `-backend-config` flags because Terraform's backend block doesn't support variable interpolation
+- **Automation**: Use `terraform-bootstrap/bootstrap.sh` script for automated setup
+- **Important**: Run bootstrap only once per environment, never delete bootstrap resources without destroying main infrastructure first
+- **Migration**: When migrating from local state, Terraform automatically uploads existing state to S3
+
 ---
 
 ## Project Overview
@@ -252,8 +293,14 @@ chucknoris-jokes/
 │   ├── Dockerfile           # Flask app container
 │   ├── nginx.conf          # Nginx proxy config
 │   └── docker-compose.yml   # 2 containers
+├── terraform-bootstrap/      # Backend infrastructure
+│   ├── main.tf             # S3 bucket + DynamoDB table
+│   ├── variables.tf        # Configuration
+│   ├── outputs.tf          # Backend resource outputs
+│   ├── bootstrap.sh        # Automated setup script
+│   └── terraform.tfvars.example # Example variables
 ├── terraform/                # IaC
-│   ├── main.tf             # AWS resources
+│   ├── main.tf             # AWS resources + backend config
 │   ├── variables.tf        # Configuration
 │   ├── outputs.tf          # Outputs
 │   ├── ssm-document.yaml  # SSM Command document

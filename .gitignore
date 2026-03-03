@@ -4,6 +4,7 @@
 .terraform/
 .terraform.lock.hcl
 terraform.tfvars
+backend-config.tfvars
 *.tfplan
 crash.log
 override.tf
