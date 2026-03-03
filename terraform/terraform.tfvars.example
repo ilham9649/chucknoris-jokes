@@ -6,7 +6,7 @@ instance_type     = "t3.nano"
 key_name          = "your-existing-key-pair-name"  # Replace with your AWS key pair name
 environment       = "dev"
 project_name      = "chucknoris-jokes"
-
+ssh_private_key_path = "/home/user/.ssh/id_rsa"
 # VPC Configuration
 # Leave null to use default VPC
 # Or specify custom VPC ID: vpc_id = "vpc-0123456789abcdef0"
