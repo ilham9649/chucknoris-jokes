@@ -1,0 +1,30 @@
+version: 0.2
+
+env:
+  variables:
+    S3_OBJECT_NAME: "app-files.tar.gz"
+
+phases:
+  install:
+    runtime-versions:
+      python: "3.11"
+
+  pre_build:
+    commands:
+      - echo "Packaging app and docker files..."
+      - tar -czf app-files.tar.gz app/ docker/
+      - echo "Package contents:"
+      - tar -tzf app-files.tar.gz
+
+  build:
+    commands:
+      - echo "Build complete."
+
+  post_build:
+    commands:
+      - echo "Artifact ready for upload."
+
+artifacts:
+  files:
+    - app-files.tar.gz
+  discard-paths: yes
